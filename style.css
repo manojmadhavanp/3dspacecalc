@@ -1,0 +1,170 @@
+html, body {
+    margin: 0;
+    padding: 0;
+    font-family: sans-serif;
+    height: 100%;
+    overflow: hidden; /* Prevent scrollbars on body */
+}
+
+#main-container {
+    display: flex;
+    flex-wrap: wrap;
+    height: 100vh; /* Full viewport height */
+}
+
+#left-panel {
+    width: 40%; /* Adjusted for more space for item inputs */
+    height: calc(100vh - 150px); /* Full height minus bottom panel */
+    border: 1px solid #ccc;
+    padding: 10px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    display: flex; /* Added for internal layout */
+    flex-direction: column; /* Stack item-inputs and container-controls */
+}
+
+#right-panel {
+    width: 60%; /* Adjusted */
+    height: calc(100vh - 150px); /* Full height minus bottom panel */
+    border: 1px solid #ccc;
+    padding: 0; /* No padding to allow visualization to fill */
+    box-sizing: border-box;
+    position: relative; /* For positioning canvas */
+}
+
+#bottom-panel {
+    width: 100%;
+    height: 150px; /* Fixed height for bottom panel */
+    border: 1px solid #ccc;
+    padding: 10px;
+    box-sizing: border-box;
+    display: flex;
+    overflow-y: auto;
+}
+
+#visualization-container {
+    width: 100%;
+    height: 100%;
+    border: 1px solid #aaa;
+    box-sizing: border-box;
+}
+
+#item-inputs { /* Takes remaining space in left-panel */
+    flex-grow: 1;
+    border: 1px dashed #eee;
+    padding: 10px;
+    margin-bottom: 10px;
+    box-sizing: border-box;
+    overflow-y: auto; /* Scroll for many items */
+}
+
+#container-controls {
+    min-height: 100px; /* Keep as is or adjust as needed */
+    border: 1px dashed #eee;
+    padding: 10px;
+    box-sizing: border-box;
+    flex-shrink: 0; /* Prevent shrinking */
+}
+
+
+#stats-display {
+    min-height: 100px;
+    flex-grow: 1; /* Allow stats to take available space */
+    margin-right: 5px; /* Spacing from logs */
+    border: 1px dashed #eee;
+    padding: 10px;
+}
+
+#logs-display {
+    min-height: 100px;
+    flex-grow: 2; /* Allow logs to take more space */
+    margin-left: 5px; /* Spacing from stats */
+    border: 1px dashed #eee;
+    padding: 10px;
+}
+
+/* Styling for dynamically added item rows */
+.item-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #f0f0f0;
+    flex-wrap: wrap; /* Allow wrapping for smaller screens, though inputs might get squished */
+}
+
+.item-row:last-child {
+    border-bottom: none;
+}
+
+.item-row input[type="text"],
+.item-row input[type="number"],
+.item-row .unit-selector,
+.item-row input[type="color"],
+.item-row label {
+    margin-right: 5px;
+    margin-bottom: 5px; /* For wrapped items */
+    padding: 4px;
+    font-size: 0.9em;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+}
+.item-row input[type="checkbox"] {
+     margin-right: 3px;
+}
+
+.item-row .item-name { width: 120px; }
+.item-row .item-dimension { width: 40px; }
+.item-row .unit-selector { width: 55px; padding: 3px;}
+.item-row .item-weight { width: 70px; }
+.item-row .item-quantity { width: 40px; }
+.item-row input[type="color"] { width: 30px; height: 20px; padding: 0; border: none; }
+.item-row .delete-item-row {
+    padding: 3px 7px;
+    background-color: #ffdddd;
+    border: 1px solid #ffaaaa;
+    color: #d00;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 0.9em;
+    margin-left: auto; /* Pushes delete button to the right */
+}
+.item-row .delete-item-row:hover {
+    background-color: #ffcccc;
+}
+
+.item-row label {
+    display: flex;
+    align-items: center;
+    font-size: 0.9em;
+    border: none; /* Labels don't need borders like inputs */
+}
+
+
+/* Basic styling for table that will be added later in item-inputs */
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+
+th {
+    background-color: #f2f2f2;
+}
+
+button { /* General button styling, can be overridden */
+    padding: 8px 12px;
+    margin-top: 5px;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    background-color: #f0f0f0;
+    border-radius: 3px;
+}
+button:hover {
+    background-color: #e0e0e0;
+}
