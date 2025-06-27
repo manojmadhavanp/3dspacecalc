@@ -143,8 +143,14 @@ for ($i = 0; $i < $item_count_to_visualize; $i++) {
             "z" => 0,
             "orientedWidth" => $currentItem['width'] ?? 0,    // Assuming no rotation for simulation
             "orientedLength" => $currentItem['length'] ?? 0,
-            "orientedHeight" => $currentItem['height'] ?? 0
-        ]
+            "orientedHeight" => $currentItem['height'] ?? 0,
+            // Simulate layer based on Z. If Z is 0, layer 1. If Z > 0 but less than some threshold, layer 2 etc.
+            // This is a very basic layer simulation. A real engine would determine exact layers.
+            "layer" => ($currentItem['height'] ?? 0) > 0 ? floor(($i * (($currentItem['height'] ?? 30))) / (($currentItem['height'] ?? 30) * 2)) + 1 : 1
+            // Example: if items are roughly same height, this puts 2 items per layer for first few.
+            // A more robust simulation: intval(round($placement_z / $typical_item_height)) + 1
+        ],
+        "color" => sprintf('#%02X%02X%02X', rand(100, 240), rand(100, 240), rand(100, 240)) // Random light-ish color
     ];
     // Accumulate volume for summary (very simplified, assumes cuboids and no rotation)
     $itemVolume = ($currentItem['width'] ?? 0) * ($currentItem['length'] ?? 0) * ($currentItem['height'] ?? 0);

@@ -182,12 +182,164 @@ if (!$report_id_from_url || !$token_from_url) {
             </div>
 
             <div class="report-section" id="visualization">
-                <h3>3D Visualization</h3>
-                <div class="visualization-placeholder">
-                    <?php echo $visualization_content; ?>
+                <h3>Visualization</h3>
+
+                <h4>2D Layered View (Top-Down)</h4>
+                <div id="report-2d-layers-view" style="margin-bottom: 20px; padding:10px; background-color:#f8f9fa; border:1px solid #dee2e6; border-radius:5px;">
+                    <!-- Canvases for 2D layers will be appended here by JavaScript -->
+                     <p id="layers-view-placeholder"><em>Loading 2D layer views... If this message persists, visualization data might be missing required fields (layers, item placements).</em></p>
+                </div>
+
+                <h4>3D Model View (Placeholder)</h4>
+                <div class="visualization-placeholder" id="report-3d-view-placeholder">
+                    <p><em>3D model rendering will appear here. The data below is what would be used.</em></p>
+                    <?php echo $visualization_content; // This shows the structured JSON data ?>
                 </div>
             </div>
         <?php endif; ?>
+
+        <script>
+            function renderContainer2DLayers(containerDivId, vizDataContainer) {
+                const containerDiv = document.getElementById(containerDivId);
+                if (!containerDiv) {
+                    console.error("2D Layers container DIV not found:", containerDivId);
+                    return;
+                }
+                containerDiv.innerHTML = ''; // Clear placeholder or previous content
+
+                const dims = vizDataContainer.containerDimensions;
+                if (!dims || !dims.width || !dims.length) {
+                    containerDiv.innerHTML = "<p><em>Container dimensions (width/length) missing for 2D view.</em></p>";
+                    console.error("Container dimensions (width/length) missing:", dims);
+                    return;
+                }
+
+                const itemsToDraw = vizDataContainer.placedItems;
+                if (!itemsToDraw || itemsToDraw.length === 0) {
+                    containerDiv.innerHTML = "<p><em>No placed items to render in 2D view.</em></p>";
+                    return;
+                }
+
+                const scale = 1.5; // Adjust scale as needed for display size
+                const layerMap = new Map();
+
+                for (const item of itemsToDraw) {
+                    const layer = item.placement?.layer ?? 0; // Default to layer 0 if not specified
+                    if (!layerMap.has(layer)) layerMap.set(layer, []);
+                    layerMap.get(layer).push(item);
+                }
+
+                if (layerMap.size === 0 && itemsToDraw.length > 0) { // If items exist but no layer info
+                     containerDiv.innerHTML = "<p><em>Items found, but no layer information available for 2D view. Drawing all on one layer.</em></p>";
+                     layerMap.set(0, itemsToDraw); // Draw all on a default layer 0
+                } else if (layerMap.size === 0) {
+                    containerDiv.innerHTML = "<p><em>No layers to display.</em></p>";
+                    return;
+                }
+
+
+                const sortedLayers = Array.from(layerMap.entries()).sort((a, b) => a[0] - b[0]);
+
+                sortedLayers.forEach(([layer, items]) => {
+                    const label = document.createElement("div");
+                    label.innerHTML = `<strong>Layer ${layer}</strong> (Top-Down View)`;
+                    label.style.marginTop = "10px";
+                    containerDiv.appendChild(label);
+
+                    const canvas = document.createElement("canvas");
+                    // Canvas width corresponds to container length, canvas height to container width for typical top-down
+                    // Or, if x is width and y is length on floor:
+                    canvas.width = dims.length * scale; // Canvas X-axis = Container Length
+                    canvas.height = dims.width * scale;  // Canvas Y-axis = Container Width
+                    // This assumes containerDimensions.length is along the X-axis of the canvas,
+                    // and containerDimensions.width is along the Y-axis of the canvas.
+                    // The item's placement.x and placement.y should correspond to this.
+
+                    canvas.style.border = "1px solid #999";
+                    canvas.style.margin = "10px 0";
+
+                    const ctx = canvas.getContext("2d");
+
+                    ctx.fillStyle = "#e9ecef"; // Light grey background for canvas
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    ctx.strokeStyle = "#343a40"; // Darker border for container
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+
+                    items.forEach(item => {
+                        // For top-down view, item.placement.x and item.placement.y are on the floor.
+                        // item.placement.orientedLength is along the container's length axis (canvas X)
+                        // item.placement.orientedWidth is along the container's width axis (canvas Y)
+                        const x = (item.placement?.x ?? 0) * scale; // Position along container length
+                        const y = (item.placement?.y ?? 0) * scale; // Position along container width
+                        const l = (item.placement?.orientedLength ?? item.originalDimensions?.length ?? 0) * scale; // Item's length on canvas X
+                        const w = (item.placement?.orientedWidth ?? item.originalDimensions?.width ?? 0) * scale;   // Item's width on canvas Y
+
+                        ctx.fillStyle = item.color || "#adb5bd"; // Default item color: grey
+                        ctx.fillRect(x, y, l, w); // Draw item: x, y, length, width
+
+                        ctx.strokeStyle = "#212529"; // Darker border for items
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(x, y, l, w);
+
+                        ctx.fillStyle = "#000";
+                        ctx.font = Math.max(10, 8 * scale * 0.2) + "px Arial"; // Adjust font size with scale
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        const itemName = item.itemName || item.type || 'Item';
+                        // Truncate text if too long for the box
+                        const maxTextWidth = l - 4; // Max width for text inside box
+                        let displayText = itemName;
+                        if (ctx.measureText(displayText).width > maxTextWidth && l > 15) { // only truncate if box is not too small
+                           while(ctx.measureText(displayText + "...").width > maxTextWidth && displayText.length > 0){
+                               displayText = displayText.substring(0, displayText.length -1);
+                           }
+                           displayText += "...";
+                        }
+                        if(l > 15 && w > 10) { // Only draw text if box is reasonably sized
+                           ctx.fillText(displayText, x + l / 2, y + w / 2);
+                        }
+                    });
+                    containerDiv.appendChild(canvas);
+                });
+            }
+
+            // This script block needs to be called after the main PHP block that defines $row or $error_message
+            <?php if (!$error_message && isset($row['VisualizationData'])): ?>
+            document.addEventListener('DOMContentLoaded', function() {
+                try {
+                    const vizDataString = <?php echo json_encode($row['VisualizationData']); ?>; // Get raw JSON string
+                    const vizData = JSON.parse(vizDataString); // Parse it
+
+                    if (vizData && vizData.containers && vizData.containers.length > 0) {
+                        // For now, render the first container's 2D layers
+                        renderContainer2DLayers('report-2d-layers-view', vizData.containers[0]);
+                    } else {
+                         document.getElementById('report-2d-layers-view').innerHTML = "<p><em>No container data found in visualization for 2D view.</em></p>";
+                    }
+
+                    // Placeholder for 3D initialization call
+                    // if (typeof init3DViewer === 'function') {
+                    //    init3DViewer('report-3d-view-placeholder', vizData);
+                    // }
+
+                } catch (e) {
+                    console.error("Error processing visualization data for 2D/3D views:", e);
+                    document.getElementById('report-2d-layers-view').innerHTML = "<p><em>Error loading 2D/3D visualization: " + e.message + "</em></p>";
+                }
+            });
+            <?php endif; ?>
+
+            // Placeholder for init3DViewer function if it were to be defined here
+            /*
+            function init3DViewer(containerId, vizData) {
+                const placeholderDiv = document.getElementById(containerId);
+                placeholderDiv.innerHTML = `<p><strong>3D Viewer Initialized (Simulated)</strong></p><pre>${JSON.stringify(vizData, null, 2)}</pre>`;
+                // Actual Three.js/BabylonJS code would go here
+            }
+            */
+        </script>
 
         <div class="report-footer">
             <p>&copy; <?php echo date("Y"); ?> <?php echo APP_NAME; ?>. All rights reserved.</p>
