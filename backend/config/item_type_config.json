@@ -1,0 +1,30 @@
+```json
+{
+  "itemTypes": {
+    "box": {
+      "maxSupportWeightKg": 50
+    },
+    "pallet": {
+      "maxSupportWeightKg": 1000,
+      "isFixedFootprint": true
+    },
+    "sacks": {
+      "maxSupportWeightKg": 10,
+      "settlingFactor": 0.9
+    },
+    "pipes": {
+      "maxSupportWeightKg": 0,
+      "handlingStrategy": "bundle"
+    },
+    "barels": {
+      "maxSupportWeightKg": 200,
+      "isCylindrical": true
+    },
+    "jumbo": {
+      "maxSupportWeightKg": 20,
+      "settlingFactor": 0.85
+    }
+  },
+  "defaultMaxSupportWeightKg": 0
+}
+```

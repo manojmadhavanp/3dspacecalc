@@ -1,0 +1,79 @@
+```json
+{
+  "usableFactor": 0.95,
+  "containerTypes": {
+    "20ftGPWood": {
+        "name": "20ft GP", "length": 594.4, "width": 233.7, "height": 238.8,
+        "doorWidth": 231.1, "doorHeight": 224.5, "maxPayload": 28200,
+        "tareWeight": 2300, "loadingTypes": ["front"], "floorType": "Wooden",
+        "category": "GP", "loadCapacityPerMeter": 4.6
+    },
+    "20ftGPSteel": {
+        "name": "20ft GP", "length": 594.4, "width": 233.7, "height": 238.8,
+        "doorWidth": 231.1, "doorHeight": 224.5, "maxPayload": 29200,
+        "tareWeight": 2450, "loadingTypes": ["front"], "floorType": "Steel",
+        "category": "GP", "loadCapacityPerMeter": 7.6
+    },
+    "40ftGPWood": {
+        "name": "40ft GP", "length": 1203.2, "width": 233.7, "height": 238.8,
+        "doorWidth": 231.1, "doorHeight": 224.5, "maxPayload": 26500,
+        "tareWeight": 3700, "loadingTypes": ["front"], "floorType": "Wooden",
+        "category": "GP", "loadCapacityPerMeter": 6.9
+    },
+    "40ftGPSteel": {
+        "name": "40ft Steel Floor", "length": 1203.2, "width": 233.7, "height": 238.8,
+        "doorWidth": 231.1, "doorHeight": 224.5, "maxPayload": 27500,
+        "tareWeight": 3850, "loadingTypes": ["front"], "floorType": "Steel",
+        "category": "GP", "loadCapacityPerMeter": 11.4
+    },
+    "40ftHCWood": {
+        "name": "40ftHCWood", "length": 1203.2, "width": 233.7, "height": 270.0,
+        "doorWidth": 231.1, "doorHeight": 224.5, "maxPayload": 26500,
+        "tareWeight": 3850, "loadingTypes": ["front"], "floorType": "Wooden",
+        "category": "OOG", "loadCapacityPerMeter": 6.9
+    },
+    "40ftHCSteel": {
+        "name": "40ftHCSteel", "length": 1203.2, "width": 243.2, "height": 270.0,
+        "doorWidth": 234.0, "doorHeight": 259.7, "maxPayload": 27500,
+        "tareWeight": 4000, "loadingTypes": ["front"], "floorType": "Steel",
+        "category": "OOG", "loadCapacityPerMeter": 11.4
+    },
+    "20ftOpenTopWood": {
+        "name": "20ftOpenTopWood", "length": 590.0, "width": 235.2, "height": 239.3,
+        "doorWidth": 234.0, "doorHeight": 229.2, "maxPayload": 28000,
+        "tareWeight": 2450, "loadingTypes": ["top", "front"], "floorType": "Wooden",
+        "category": "OOG", "loadCapacityPerMeter": 4.6
+    },
+    "20ftOpenTopSteel": {
+        "name": "20ftOpenTopSteel", "length": 590.0, "width": 235.2, "height": 239.3,
+        "doorWidth": 234.0, "doorHeight": 229.2, "maxPayload": 28800,
+        "tareWeight": 2600, "loadingTypes": ["top", "front"], "floorType": "Steel",
+        "category": "OOG", "loadCapacityPerMeter": 7.6
+    },
+    "40ftOpenTopWood": {
+        "name": "40ftOpenTopWood", "length": 1203.0, "width": 235.0, "height": 238.0,
+        "doorWidth": 231.0, "doorHeight": 227.6, "maxPayload": 26400,
+        "tareWeight": 4050, "loadingTypes": ["top", "front"], "floorType": "Wooden",
+        "category": "OOG", "loadCapacityPerMeter": 6.9
+    },
+    "40ftOpenTopSteel": {
+        "name": "40ftOpenTopSteel", "length": 1203.0, "width": 235.0, "height": 238.0,
+        "doorWidth": 231.0, "doorHeight": 227.6, "maxPayload": 27200,
+        "tareWeight": 4200, "loadingTypes": ["top", "front"], "floorType": "Steel",
+        "category": "OOG", "loadCapacityPerMeter": 11.4
+    },
+    "20ftFlatRack": {
+        "name": "20ftFlatRack", "length": 590.0, "width": 222.4, "height": 224.8,
+        "doorWidth": 0, "doorHeight": 0, "maxPayload": 31000,
+        "tareWeight": 2500, "loadingTypes": ["open"], "floorType": "Steel",
+        "category": "OOG", "loadCapacityPerMeter": 7.6
+    },
+    "40ftFlatRack": {
+        "name": "40ftFlatRack", "length": 1165.2, "width": 222.4, "height": 224.8,
+        "doorWidth": 0, "doorHeight": 0, "maxPayload": 40000,
+        "tareWeight": 5950, "loadingTypes": ["open"], "floorType": "Steel",
+        "category": "OOG", "loadCapacityPerMeter": 11.4
+    }
+  }
+}
+```
