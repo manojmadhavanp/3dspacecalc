@@ -211,87 +211,90 @@ document.addEventListener('DOMContentLoaded', function() {
     let processedItemsData = []; // To store items after step 1
 
     processListBtn.addEventListener('click', function() {
-        const materialFile = document.getElementById('materialFile').files[0];
+        const materialFileInput = document.getElementById('materialFile');
+        const materialFile = materialFileInput.files[0];
+
+        // Frontend Validation
         if (!materialFile) {
             alert('Please select a material list file.');
+            materialFileInput.focus();
+            return;
+        }
+        // Basic file type validation (can be expanded)
+        const allowedTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+        if (!allowedTypes.includes(materialFile.type)) {
+            // Note: Mime type check isn't foolproof. Server-side validation is more reliable.
+            // This provides a basic UX check.
+            // alert(`Invalid file type: ${materialFile.type}. Please upload a CSV or Excel file.`);
+            // For now, let server handle strict type validation, as client-side can be bypassed.
+            // We'll primarily check if a file is selected.
+        }
+        const maxFileSize = 5 * 1024 * 1024; // 5 MB
+        if (materialFile.size > maxFileSize) {
+            alert(`File is too large (${(materialFile.size / 1024 / 1024).toFixed(2)} MB). Maximum size is 5 MB.`);
             return;
         }
 
-        // Show loading state (optional, for a real API call)
-        itemMappingArea.innerHTML = '<div class="loading-spinner"></div><p>Processing file...</p>';
+        itemMappingArea.innerHTML = '<div class="loading-spinner"></div><p>Processing file via API...</p>';
         itemMappingSection.style.display = 'block';
         outputSection.style.display = 'none'; // Hide previous results
 
-        // Simulate API call to `getitemlist`
-        // In a real app, this would be an AJAX call:
-        // const formData = new FormData(materialUploadForm);
-        // fetch('/api/getitemlist', { method: 'POST', body: formData })
-        //   .then(response => response.json())
-        //   .then(data => { /* ... handle data ... */ })
-        //   .catch(error => { /* ... handle error ... */ });
+        const formData = new FormData();
+        formData.append('materialFile', materialFile);
+        // Add other data if needed by API, e.g., selected client ID
+        const clientSelect = document.getElementById('clientSelect').value;
+        if(clientSelect) {
+            formData.append('clientId', clientSelect);
+        }
 
-        mockGetItemListAPI(materialFile)
-            .then(items => {
-                processedItemsData = items; // Store for later
-                renderItemMappingTable(items);
+        fetch('../api/getitemlist.php', {
+            method: 'POST',
+            body: formData
+            // Headers are not strictly needed for FormData with fetch, browser sets multipart/form-data
+        })
+        .then(response => {
+            if (!response.ok) {
+                // Try to parse error JSON if server sent one, otherwise use statusText
+                return response.json().catch(() => {
+                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                }).then(errData => {
+                     throw new Error(errData.error || `API Error: ${response.status} ${response.statusText}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success && data.items) {
+                processedItemsData = data.items; // Store for later
+                renderItemMappingTable(data.items);
                 itemMappingSection.style.display = 'block';
-                reportGenerationStatus.style.display = 'none';
-            })
-            .catch(error => {
-                itemMappingArea.innerHTML = `<p class="error-message">Error processing file: ${error.message}</p>`;
-                reportGenerationStatus.style.display = 'none';
-            });
+                if(data.message) { // Display any informational message from API
+                    const msgDiv = document.createElement('p');
+                    msgDiv.className = 'message success-message'; // Or 'info-message'
+                    msgDiv.textContent = data.message;
+                    itemMappingArea.insertBefore(msgDiv, itemMappingArea.firstChild);
+                }
+            } else {
+                throw new Error(data.error || 'Failed to process file: API returned no items.');
+            }
+        })
+        .catch(error => {
+            console.error('Error calling getitemlist API:', error);
+            itemMappingArea.innerHTML = `<p class="message error-message">Error processing file: ${error.message}</p>`;
+        })
+        .finally(() => {
+            // Remove spinner if it wasn't replaced by table or error
+            const spinner = itemMappingArea.querySelector('.loading-spinner');
+            if (spinner && spinner.parentNode === itemMappingArea) { // Check if it's still a direct child
+                 const p = spinner.nextElementSibling; // also remove the 'Processing file...' P tag
+                 if(p) p.remove();
+                 spinner.remove();
+            }
+             reportGenerationStatus.style.display = 'none'; // Ensure this is hidden
+        });
     });
 
-    function mockGetItemListAPI(file) {
-        console.log("Simulating API call to getitemlist with file:", file.name);
-        return new Promise((resolve, reject) => {
-            setTimeout(() => {
-                // Simulate reading some items. For CSV, you might parse it here or server-side.
-                // This is a very basic mock.
-                if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
-                     const reader = new FileReader();
-                     reader.onload = function(e) {
-                        const lines = e.target.result.split('\\n').filter(line => line.trim() !== '');
-                        const headers = lines[0] ? lines[0].split(',').map(h => h.trim()) : ['SKU', 'Name', 'Quantity', 'Length', 'Width', 'Height', 'Weight'];
-                        const mockItems = [];
-                        // Start from line 1 if headers exist, else 0
-                        for(let i = (lines[0] ? 1:0) ; i < Math.min(lines.length, 6); i++) { // take first 5 data lines
-                            const values = lines[i] ? lines[i].split(',') : [];
-                            mockItems.push({
-                                id: `item-${i}`,
-                                sku: values[0] || `SKU_XYZ${i}`,
-                                name: values[1] || `Product ${i}`,
-                                quantity: parseInt(values[2] || (i+1) * 2),
-                                length: parseFloat(values[3] || 10 + i),
-                                width: parseFloat(values[4] || 10 + i),
-                                height: parseFloat(values[5] || 10 + i),
-                                weight: parseFloat(values[6] || 5 + i),
-                                // Add more fields as needed by your backend
-                            });
-                        }
-                         if(mockItems.length === 0 && lines.length > 0) { // If only header or empty file
-                            mockItems.push({ id: 'item-empty', sku: 'NO_DATA', name: 'No data rows found in file', quantity:0, length:0,width:0,height:0,weight:0 });
-                        } else if (mockItems.length === 0) {
-                             mockItems.push({ id: 'item-empty', sku: 'EMPTY_FILE', name: 'File appears empty', quantity:0, length:0,width:0,height:0,weight:0 });
-                        }
-                        resolve(mockItems);
-                     };
-                     reader.onerror = function() {
-                         reject(new Error('Could not read file content for mocking.'));
-                     }
-                     reader.readAsText(file);
-                } else {
-                     // Generic mock for non-csv for now
-                    resolve([
-                        { id: 'item-1', sku: 'SKU001', name: 'Large Box', quantity: 10, length: 50, width: 30, height: 20, weight: 5 },
-                        { id: 'item-2', sku: 'SKU002', name: 'Medium Cylinder', quantity: 5, diameter: 20, height: 40, weight: 3 }, // Example of different shape
-                        { id: 'item-3', sku: 'SKU003', name: 'Small Cube', quantity: 20, length: 10, width: 10, height: 10, weight: 1 }
-                    ]);
-                }
-            }, 1500); // Simulate network delay
-        });
-    }
+    // mockGetItemListAPI function is now removed as we use real fetch
 
     function renderItemMappingTable(items) {
         if (!items || items.length === 0) {
@@ -325,19 +328,50 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     generateReportBtn.addEventListener('click', function() {
-        // Collect mapped data
+        // --- Frontend Validation ---
+        if (processedItemsData.length === 0) {
+            alert('No items have been processed from a material list yet. Please complete Step 1.');
+            // Potentially focus on the file input or processListBtn
+            document.getElementById('materialFile').focus();
+            return;
+        }
+        const containerTypeInput = document.getElementById('containerType');
+        if (!containerTypeInput.value) {
+            alert('Please select a container type.');
+            containerTypeInput.focus();
+            return;
+        }
+        // Add more validation for mapped item inputs if necessary (e.g., check for valid numbers in dimensions)
+        let itemsValid = true;
+        const itemRowsForValidation = itemMappingArea.querySelectorAll('tbody tr');
+        itemRowsForValidation.forEach(row => {
+            row.querySelectorAll('input[type="number"]').forEach(numInput => {
+                if (isNaN(parseFloat(numInput.value)) && numInput.required) { // Simple check, can be more robust
+                    itemsValid = false;
+                    numInput.style.border = '1px solid red';
+                } else {
+                    numInput.style.border = ''; // Reset border
+                }
+            });
+        });
+        if (!itemsValid) {
+            alert('Some item inputs are invalid or missing. Please check the highlighted fields.');
+            return;
+        }
+
+
+        // --- Collect mapped data ---
         const mappedItems = [];
         const itemRows = itemMappingArea.querySelectorAll('tbody tr');
         itemRows.forEach((row, index) => {
-            const originalItem = processedItemsData[index]; // Get original item by index
+            const originalItem = processedItemsData[index];
             if (!originalItem) return;
 
-            const mappedItem = { ...originalItem }; // Start with original data
+            const mappedItem = { ...originalItem };
 
-            row.querySelectorAll('input').forEach(input => {
-                const nameParts = input.name.split('-'); // e.g., item-1-quantity
-                const key = nameParts.pop(); // e.g., quantity or stackable
-                // const itemId = nameParts.join('-'); // e.g., item-1 (not strictly needed if using processedItemsData index)
+            row.querySelectorAll('input, select').forEach(input => { // Include selects if any in rows
+                const nameParts = input.name.split('-');
+                const key = nameParts.pop();
 
                 if (input.type === 'checkbox') {
                     mappedItem[key] = input.checked;
@@ -351,84 +385,72 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         const clientSelect = document.getElementById('clientSelect').value;
-        const containerType = document.getElementById('containerType').value;
+        const containerType = containerTypeInput.value;
 
         const reportPayload = {
-            clientId: clientSelect,
+            clientId: clientSelect || null, // Send null if empty
             containerType: containerType,
             items: mappedItems,
-            // Add any other global settings from #additional-inputs-area
+            // Add any other global settings from #additional-inputs-area if they exist
         };
 
-        // Show loading state
         reportGenerationStatus.style.display = 'block';
         outputSection.style.display = 'none';
 
-        // Simulate API call to `generateReport`
-        // In a real app, this would be an AJAX call:
-        // fetch('/api/generateReport', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify(reportPayload)
-        // })
-        // .then(response => response.json())
-        // .then(data => { /* ... handle data ... */ })
-        // .catch(error => { /* ... handle error ... */ });
+        fetch('../api/generateReport.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reportPayload)
+        })
+        .then(response => {
+            if (!response.ok) {
+                 return response.json().catch(() => {
+                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                }).then(errData => {
+                     throw new Error(errData.error || `API Error: ${response.status} ${response.statusText}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                reportArea.innerHTML = `<h4>HTML Report:</h4><div>${data.htmlReport || 'No HTML report content.'}</div>`;
 
-        mockGenerateReportAPI(reportPayload)
-            .then(result => {
-                reportArea.innerHTML = `<h4>HTML Report:</h4><div>${result.htmlReport}</div>`;
-                visualizationArea.innerHTML = `<h4>3D Visualization:</h4><div id="viz-container" style="width:100%; height:300px; background:#eee; display:flex; align-items:center; justify-content:center;">${result.visualizationData.message} (Actual 3D model would render here based on data: ${JSON.stringify(result.visualizationData.modelDetails)})</div>`;
+                // Display structured visualization data (text/JSON for now)
+                let vizContent = '<h4>3D Visualization Data:</h4>';
+                if (data.visualizationData) {
+                    vizContent += `<pre style="background:#f0f0f0; padding:10px; border-radius:4px; font-size:0.8em; white-space: pre-wrap; word-break: break-all;">${JSON.stringify(data.visualizationData, null, 2)}</pre>`;
+                } else {
+                    vizContent += '<p>No visualization data returned.</p>';
+                }
+                visualizationArea.innerHTML = vizContent;
 
-                shareLink.href = result.shareableLink;
-                shareLink.textContent = result.shareableLink;
-                shareLinkInput.value = result.shareableLink;
-                shareLinkArea.style.display = 'block';
-
+                if(data.shareableLink) {
+                    shareLink.href = data.shareableLink;
+                    shareLink.textContent = data.shareableLink;
+                    shareLinkInput.value = data.shareableLink;
+                    shareLinkArea.style.display = 'block';
+                } else {
+                    shareLinkArea.style.display = 'none';
+                }
                 outputSection.style.display = 'block';
-            })
-            .catch(error => {
-                reportArea.innerHTML = `<p class="error-message">Error generating report: ${error.message}</p>`;
-                visualizationArea.innerHTML = '';
-                shareLinkArea.style.display = 'none';
-                outputSection.style.display = 'block'; // Show output section to display the error
-            })
-            .finally(() => {
-                reportGenerationStatus.style.display = 'none';
-            });
+            } else {
+                 throw new Error(data.error || 'Failed to generate report: API returned an error.');
+            }
+        })
+        .catch(error => {
+            console.error('Error calling generateReport API:', error);
+            reportArea.innerHTML = `<p class="message error-message">Error generating report: ${error.message}</p>`;
+            visualizationArea.innerHTML = ''; // Clear previous viz
+            shareLinkArea.style.display = 'none'; // Hide share link
+            outputSection.style.display = 'block'; // Show output section to display the error
+        })
+        .finally(() => {
+            reportGenerationStatus.style.display = 'none';
+        });
     });
 
-    function mockGenerateReportAPI(payload) {
-        console.log("Simulating API call to generateReport with payload:", payload);
-        return new Promise((resolve, reject) => {
-            setTimeout(() => {
-                // Simulate a successful response
-                const reportId = `rep-${Date.now()}`;
-                const shareableLink = `https://example.com/view_report/${reportId}?token=xyzabc`;
-
-                // Here, a UID would be associated with the search, and the CompanyID
-                // This would be done server-side when actually saving the search.
-                // For now, this is just a mock.
-                // A real implementation would also save payload (SearchFormData) and this response (SearchReturnData, ReportHTML, VisualizationData)
-                // to the `search` table in the database.
-
-                resolve({
-                    reportId: reportId,
-                    htmlReport: `<p>This is a <strong>simulated HTML report</strong> for container type ${payload.containerType} with ${payload.items.length} item types.</p><p>Total items: ${payload.items.reduce((sum, item) => sum + (item.quantity || 0), 0)}</p><p>Client ID: ${payload.clientId || 'N/A'}</p>`,
-                    visualizationData: {
-                        message: "Simulated 3D model placeholder.",
-                        modelDetails: {
-                            container: payload.containerType,
-                            itemsLoaded: payload.items.length,
-                            // ... more data for actual 3D rendering
-                        }
-                    },
-                    shareableLink: shareableLink,
-                    status: "success"
-                });
-            }, 2500); // Simulate network and processing delay
-        });
-    }
+    // mockGenerateReportAPI function is now removed
 
     copyShareLinkBtn.addEventListener('click', function() {
         shareLinkInput.select();
