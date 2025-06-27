@@ -90,20 +90,75 @@ $simulated_html_report .= "<p><em>This is a simulated report. Actual report woul
 $simulated_html_report .= "<p>Generated on: " . date('Y-m-d H:i:s') . "</p>";
 
 
-// Simulated Visualization Data (placeholder)
+// Simulated Visualization Data (matching user-provided structure)
 $simulated_visualization_data = [
-    'engine' => 'placeholder_3d_engine',
-    'message' => 'Simulated 3D model data would be here.',
-    'container' => ['type' => $container_type, 'dimensions_mm' => ['length' => 6058, 'width' => 2438, 'height' => 2591]], // Example for 20ft GP
-    'loaded_items_count' => count($items),
-    'item_positions' => [] // In real scenario, this would be an array of item objects with x,y,z coords and orientation
+    "requestName" => "Simulated Request - " . $report_id,
+    "status" => "success",
+    "summary" => [
+        "totalItemsToPlace" => count($items), // Simplified
+        "totalItemsPlaced" => count($items),  // Simplified
+        "totalWeightPlaced" => array_sum(array_column($items, 'weight')) ?: 0, // Simplified
+        "totalVolumePlaced" => 0, // Placeholder, real calculation needed
+    ],
+    "containers" => [
+        [
+            "containerKey" => $container_type, // e.g., "20ftGPWood"
+            "containerName" => $container_type, // e.g., "20ft GP"
+            "containerDimensions" => [ // Example dimensions, should match container_type
+                "width" => 233.7, "length" => 594.4, "height" => 238.8, // cm
+                "usableVolume" => 31513196.9, "usablePayload" => 26790 // cm^3, kg
+            ],
+            "floorType" => "Wooden", // Example
+            "loadSummary" => [
+                "itemCount" => count($items),
+                "totalWeight" => array_sum(array_column($items, 'weight')) ?: 0,
+                "totalVolume" => 0, // Placeholder
+                "volumeUtilizationPercent" => 0, // Placeholder
+                "payloadUtilizationPercent" => 0, // Placeholder
+            ],
+            "placedItems" => [], // Will be populated below
+            "remainingEmptyBoxAreas" => [] // Placeholder
+        ]
+    ],
+    "unplacedItems" => [] // Placeholder
 ];
-for ($i=0; $i < min(count($items), 3); $i++) { // Add a few example items to visualization data
-    $simulated_visualization_data['item_positions'][] = [
-        'sku' => $items[$i]['sku'] ?? "ITEM_{$i}",
-        'x' => rand(0,100), 'y' => rand(0,100), 'z' => rand(0,100),
-        'length' => $items[$i]['length'] ?? 0, 'width' => $items[$i]['width'] ?? 0, 'height' => $items[$i]['height'] ?? 0,
+
+// Populate placedItems with a few items from the input for simulation
+$item_count_to_visualize = min(count($items), 5); // Visualize up to 5 items
+for ($i = 0; $i < $item_count_to_visualize; $i++) {
+    $currentItem = $items[$i];
+    $simulated_visualization_data["containers"][0]["placedItems"][] = [
+        "itemName" => $currentItem['name'] ?? ($currentItem['sku'] ?? "Item " . ($i+1)),
+        "originalQtyIndex" => $i + 1,
+        "type" => $currentItem['type'] ?? "box", // Assuming a 'type' field or default to 'box'
+        "originalDimensions" => [
+            "width" => $currentItem['width'] ?? 0,
+            "length" => $currentItem['length'] ?? 0,
+            "height" => $currentItem['height'] ?? 0
+        ],
+        "weight" => $currentItem['weight'] ?? 0,
+        "placement" => [ // Simulate some basic placement
+            "x" => $i * (($currentItem['width'] ?? 30) + 5), // Simple stacking along X
+            "y" => 0,
+            "z" => 0,
+            "orientedWidth" => $currentItem['width'] ?? 0,    // Assuming no rotation for simulation
+            "orientedLength" => $currentItem['length'] ?? 0,
+            "orientedHeight" => $currentItem['height'] ?? 0
+        ]
     ];
+    // Accumulate volume for summary (very simplified, assumes cuboids and no rotation)
+    $itemVolume = ($currentItem['width'] ?? 0) * ($currentItem['length'] ?? 0) * ($currentItem['height'] ?? 0);
+    $simulated_visualization_data["summary"]["totalVolumePlaced"] += $itemVolume * ($currentItem['quantity'] ?? 1);
+    $simulated_visualization_data["containers"][0]["loadSummary"]["totalVolume"] += $itemVolume * ($currentItem['quantity'] ?? 1);
+}
+
+if ($simulated_visualization_data["containers"][0]["containerDimensions"]["usableVolume"] > 0) {
+    $volUtil = ($simulated_visualization_data["containers"][0]["loadSummary"]["totalVolume"] / $simulated_visualization_data["containers"][0]["containerDimensions"]["usableVolume"]) * 100;
+    $simulated_visualization_data["containers"][0]["loadSummary"]["volumeUtilizationPercent"] = round($volUtil, 2);
+}
+if ($simulated_visualization_data["containers"][0]["containerDimensions"]["usablePayload"] > 0 && isset($simulated_visualization_data["containers"][0]["loadSummary"]["totalWeight"])) {
+    $payloadUtil = ($simulated_visualization_data["containers"][0]["loadSummary"]["totalWeight"] / $simulated_visualization_data["containers"][0]["containerDimensions"]["usablePayload"]) * 100;
+    $simulated_visualization_data["containers"][0]["loadSummary"]["payloadUtilizationPercent"] = round($payloadUtil, 2);
 }
 
 

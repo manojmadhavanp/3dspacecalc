@@ -30,19 +30,67 @@ if (!$report_id_from_url || !$token_from_url) {
 
             if ($stored_token === $token_from_url) {
                 $report_content = $row['ReportHTML'];
+                $visualization_content = "<p><em>No detailed visualization data available or data is not in the expected format.</em></p>"; // Default
+
                 if (!empty($row['VisualizationData'])) {
-                    $viz_data = json_decode($row['VisualizationData'], true);
-                    // For display, we'll just show a message or the raw JSON for the placeholder
-                    if (isset($viz_data['message'])) {
-                        $visualization_content = "<p>" . htmlspecialchars($viz_data['message']) . "</p>";
-                        if(isset($viz_data['modelDetails'])) {
-                             $visualization_content .= "<pre style='background:#f0f0f0; padding:10px; border-radius:4px; font-size:0.8em;'>" . htmlspecialchars(json_encode($viz_data['modelDetails'], JSON_PRETTY_PRINT)) . "</pre>";
+                    $viz_data_json = json_decode($row['VisualizationData'], true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($viz_data_json)) {
+                        $temp_viz_html = "<h4>Overall Request: " . htmlspecialchars($viz_data_json['requestName'] ?? 'N/A') . " (Status: " . htmlspecialchars($viz_data_json['status'] ?? 'N/A') . ")</h4>";
+
+                        if (isset($viz_data_json['summary'])) {
+                            $summary = $viz_data_json['summary'];
+                            $temp_viz_html .= "<p><strong>Summary:</strong> Placed " . htmlspecialchars($summary['totalItemsPlaced'] ?? 0) . "/" . htmlspecialchars($summary['totalItemsToPlace'] ?? 0) . " items. ";
+                            $temp_viz_html .= "Weight: " . htmlspecialchars($summary['totalWeightPlaced'] ?? 0) . " kg. ";
+                            $temp_viz_html .= "Volume: " . htmlspecialchars($summary['totalVolumePlaced'] ?? 0) . " cm³.</p>";
                         }
+
+                        if (isset($viz_data_json['containers']) && is_array($viz_data_json['containers'])) {
+                            foreach($viz_data_json['containers'] as $index => $container) {
+                                $temp_viz_html .= "<div style='border:1px solid #eee; padding:10px; margin-top:10px; border-radius:5px;'>";
+                                $temp_viz_html .= "<h5>Container " . ($index + 1) . ": " . htmlspecialchars($container['containerName'] ?? $container['containerKey'] ?? 'Unknown Container') . "</h5>";
+                                if (isset($container['containerDimensions'])) {
+                                    $cd = $container['containerDimensions'];
+                                    $temp_viz_html .= "<p style='font-size:0.9em;'>Dimensions (cm): W " . htmlspecialchars($cd['width'] ?? 'N/A') . " x L " . htmlspecialchars($cd['length'] ?? 'N/A') . " x H " . htmlspecialchars($cd['height'] ?? 'N/A') . "<br>";
+                                    $temp_viz_html .= "Usable Vol: " . htmlspecialchars($cd['usableVolume'] ?? 'N/A') . " cm³, Usable Payload: " . htmlspecialchars($cd['usablePayload'] ?? 'N/A') . " kg. Floor: ". htmlspecialchars($container['floorType'] ?? 'N/A') ."</p>";
+                                }
+                                if (isset($container['loadSummary'])) {
+                                    $ls = $container['loadSummary'];
+                                    $temp_viz_html .= "<p style='font-size:0.9em;'>Load: " . htmlspecialchars($ls['itemCount'] ?? 0) . " items, Weight " . htmlspecialchars($ls['totalWeight'] ?? 0) . " kg, Volume " . htmlspecialchars($ls['totalVolume'] ?? 0) . " cm³.<br>";
+                                    $temp_viz_html .= "Utilization: " . htmlspecialchars($ls['volumeUtilizationPercent'] ?? 0) . "% vol, " . htmlspecialchars($ls['payloadUtilizationPercent'] ?? 0) . "% payload.</p>";
+                                }
+
+                                if (isset($container['placedItems']) && is_array($container['placedItems']) && count($container['placedItems']) > 0) {
+                                    $temp_viz_html .= "<h6>Placed Items:</h6><ul style='font-size:0.85em; max-height:200px; overflow-y:auto;'>";
+                                    foreach($container['placedItems'] as $pItem) {
+                                        $temp_viz_html .= "<li><strong>" . htmlspecialchars($pItem['itemName'] ?? 'Item') . "</strong> (Type: ".htmlspecialchars($pItem['type'] ?? 'N/A').")";
+                                        $dims = $pItem['originalDimensions'] ?? [];
+                                        $place = $pItem['placement'] ?? [];
+                                        $temp_viz_html .= "<br>&nbsp;&nbsp;Original Dim (W L H): " . htmlspecialchars($dims['width'] ?? '?')." x ".htmlspecialchars($dims['length'] ?? '?')." x ".htmlspecialchars($dims['height'] ?? '?');
+                                        $temp_viz_html .= "<br>&nbsp;&nbsp;Placement (X Y Z): " . htmlspecialchars($place['x'] ?? '?').", ".htmlspecialchars($place['y'] ?? '?').", ".htmlspecialchars($place['z'] ?? '?');
+                                        $temp_viz_html .= "<br>&nbsp;&nbsp;Oriented Dim (W L H): " . htmlspecialchars($place['orientedWidth'] ?? '?')." x ".htmlspecialchars($place['orientedLength'] ?? '?')." x ".htmlspecialchars($place['orientedHeight'] ?? '?');
+                                        $temp_viz_html .= "</li>";
+                                    }
+                                    $temp_viz_html .= "</ul>";
+                                } else {
+                                    $temp_viz_html .= "<p><em>No items placed in this container according to visualization data.</em></p>";
+                                }
+                                $temp_viz_html .= "</div>"; // close container div
+                            }
+                        }
+                         if (isset($viz_data_json['unplacedItems']) && is_array($viz_data_json['unplacedItems']) && count($viz_data_json['unplacedItems']) > 0) {
+                            $temp_viz_html .= "<h4>Unplaced Items:</h4><ul>";
+                            foreach($viz_data_json['unplacedItems'] as $uItem){
+                                $temp_viz_html .= "<li>" . htmlspecialchars($uItem['itemName'] ?? ($uItem['sku'] ?? 'Unknown Item')) . " - Qty: " . htmlspecialchars($uItem['quantity'] ?? 1) . "</li>";
+                            }
+                            $temp_viz_html .= "</ul>";
+                        }
+                        $visualization_content = $temp_viz_html;
                     } else {
-                        $visualization_content = "<pre style='background:#f0f0f0; padding:10px; border-radius:4px; font-size:0.8em;'>" . htmlspecialchars(json_encode($viz_data, JSON_PRETTY_PRINT)) . "</pre>";
+                         // Keep default message if JSON structure is not as expected or not decodable
+                         $visualization_content = "<p><em>Visualization data is present but not in the expected detailed format.</em></p><pre style='background:#f0f0f0; padding:10px; border-radius:4px; font-size:0.8em; white-space:pre-wrap; word-break:break-all;'>" . htmlspecialchars($row['VisualizationData']) . "</pre>";
                     }
                 } else {
-                    $visualization_content = "<p><em>No visualization data available.</em></p>";
+                    $visualization_content = "<p><em>No visualization data available in database record.</em></p>";
                 }
 
                 if (empty($report_content)) {
