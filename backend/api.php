@@ -163,6 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 "orientedWidth" => $p->orientedWidth, "orientedLength" => $p->orientedLength, "orientedHeight" => $p->orientedHeight]
                         ];
                     }, $placementResult['placedItems']),
+                    "layers" => $placementResult['layers'], // Add the new layers data directly
                     "remainingEmptyBoxAreas" => array_map(function(BoxArea $ba) {
                         return ["id"=>$ba->id, "x"=>$ba->x, "y"=>$ba->y, "z"=>$ba->z, "width"=>$ba->width, "length"=>$ba->length, "height"=>$ba->height];
                     }, $placementResult['finalEmptyBoxAreas'])
@@ -171,8 +172,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Overall Summary Calculation
-        $finalTotalWeightPlaced = array_reduce($itemsSuccessfullyPlacedInAnyContainer, fn($sum, PlacedItem $p) => $sum + $p->weight, 0);
-        $finalTotalVolumePlaced = array_reduce($itemsSuccessfullyPlacedInAnyContainer, fn($sum, PlacedItem $p) => $sum + ($p->originalDimensions['width']*$p->originalDimensions['length']*$p->originalDimensions['height']), 0);
+        // This calculation should use $itemsSuccessfullyPlacedInAnyContainer which holds PlacedItem objects
+        $finalTotalWeightPlaced = 0;
+        $finalTotalVolumePlaced = 0; // Based on original dimensions for consistency
+        if (is_array($itemsSuccessfullyPlacedInAnyContainer)) { // Ensure it's an array
+            foreach($itemsSuccessfullyPlacedInAnyContainer as $pItemObject) {
+                if ($pItemObject instanceof PlacedItem) {
+                    $finalTotalWeightPlaced += $pItemObject->weight;
+                    $finalTotalVolumePlaced += $pItemObject->originalDimensions['width'] * $pItemObject->originalDimensions['length'] * $pItemObject->originalDimensions['height'];
+                }
+            }
+        }
         $totalItemsToPlaceCount = array_reduce($rawItems, fn($sum, $itemData) => $sum + (int)($itemData['qty'] ?? 0),0);
 
 
@@ -181,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "status" => empty($overallUnplacedItems) ? "success" : (count($itemsSuccessfullyPlacedInAnyContainer) > 0 ? "partial_fit" : "no_fit"),
             "summary" => [
                 "totalItemsToPlace" => $totalItemsToPlaceCount,
-                "totalItemsPlaced" => count($itemsSuccessfullyPlacedInAnyContainer),
+                "totalItemsPlaced" => count($itemsSuccessfullyPlacedInAnyContainer), // Count of PlacedItem objects
                 "totalWeightPlaced" => round($finalTotalWeightPlaced,2),
                 "totalVolumePlaced" => round($finalTotalVolumePlaced,2),
             ],
