@@ -48,7 +48,7 @@ $routes = [
     'user/clients' => 'user_area/clients.php',
     'user/company_users' => 'user_area/company_users.php',
     'user/new_calculation' => 'user_area/new_calculation.php',
-    // 'user/account_settings' => 'user_area/account_settings.php', // Example for future
+    'user/account_settings' => 'user_area/account_settings.php',
 
     // View Report (publicly accessible, query params like ?id=...&token=... will be passed automatically)
     'view_report' => 'view_report.php',

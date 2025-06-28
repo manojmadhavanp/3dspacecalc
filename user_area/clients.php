@@ -1,264 +1,62 @@
 <?php
-require_once 'check_session.php'; // Ensures user is logged in, provides $user_first_name, $conn might be available if db_connect is in check_session
-require_once __DIR__ . '/../db_connect.php'; // Ensures $conn is available
-
+// This file will now be primarily a view, with JS handling data and interactions.
+// Session check for page access is still important.
+require_once 'check_session.php';
+// config.php is included by header.php, which gives us APP_CONFIG.baseApiUrl etc.
 $pageTitle = "Manage Clients";
 require_once __DIR__ . '/../templates/header.php';
-
-$action = $_GET['action'] ?? 'list'; // Default action is to list clients
-$client_id_to_edit = $_GET['id'] ?? null; // For editing/deleting specific client
-
-$feedback_message = '';
-$feedback_type = ''; // 'success' or 'error'
-
-// Get current user's CompanyID
-$currentCompanyID = null;
-if (isset($_SESSION['user_uid'])) {
-    $user_uid = $_SESSION['user_uid'];
-    $stmt_company = $conn->prepare("SELECT CompanyID FROM users WHERE UID = ?");
-    if ($stmt_company) {
-        $stmt_company->bind_param("i", $user_uid);
-        $stmt_company->execute();
-        $result_company = $stmt_company->get_result();
-        if ($user_company_details = $result_company->fetch_assoc()) {
-            $currentCompanyID = $user_company_details['CompanyID'];
-        }
-        $stmt_company->close();
-    } else {
-        $feedback_message = "Error: Could not retrieve company details for user.";
-        $feedback_type = 'error';
-        error_log("Failed to prepare statement to get CompanyID for UID: " . $user_uid . " Error: " . $conn->error);
-    }
-} else {
-    // Should not happen if check_session is working
-    $feedback_message = "Error: User session not found.";
-    $feedback_type = 'error';
-    $action = 'error_state'; // Prevent further processing
-}
-
-
-// --- Handle Form Submissions (Add/Edit Client) ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $currentCompanyID) {
-    $clientName = trim($_POST['clientName'] ?? '');
-    $clientEmail = trim($_POST['clientEmail'] ?? '');
-    $clientAddress = trim($_POST['clientAddress'] ?? '');
-    $clientCCID = $_POST['ccid'] ?? null; // Hidden field for edits
-
-    if (isset($_POST['save_client'])) { // Corresponds to add or edit
-        if (empty($clientName)) {
-            $feedback_message = "Client Company Name is required.";
-            $feedback_type = 'error';
-        } elseif (!empty($clientEmail) && !filter_var($clientEmail, FILTER_VALIDATE_EMAIL)) {
-            $feedback_message = "Invalid Client Email format.";
-            $feedback_type = 'error';
-        } else {
-            if ($clientCCID) { // --- Update Existing Client ---
-                $stmt = $conn->prepare("UPDATE client SET CompanyName = ?, Email = ?, Address = ?, UpdatedOn = CURRENT_TIMESTAMP WHERE CCID = ? AND AddedByCompanyID = ?");
-                if ($stmt) {
-                    $stmt->bind_param("sssii", $clientName, $clientEmail, $clientAddress, $clientCCID, $currentCompanyID);
-                    if ($stmt->execute()) {
-                        $feedback_message = "Client updated successfully!";
-                        $feedback_type = 'success';
-                        $action = 'list'; // Go back to list view
-                    } else {
-                        $feedback_message = "Error updating client: " . $stmt->error;
-                        $feedback_type = 'error';
-                    }
-                    $stmt->close();
-                } else {
-                    $feedback_message = "Database error (prepare update): " . $conn->error;
-                    $feedback_type = 'error';
-                }
-            } else { // --- Add New Client ---
-                $clientIDBase = "CL-" . strtoupper(substr(preg_replace("/[^a-zA-Z0-9]+/", "", $clientName), 0, 5));
-                $newClientID = $clientIDBase . "-" . time(); // Simple unique ID
-
-                $stmt = $conn->prepare("INSERT INTO client (ClientID, CompanyName, Email, Address, AddedByCompanyID) VALUES (?, ?, ?, ?, ?)");
-                if ($stmt) {
-                    $stmt->bind_param("ssssi", $newClientID, $clientName, $clientEmail, $clientAddress, $currentCompanyID);
-                    if ($stmt->execute()) {
-                        $feedback_message = "Client '" . htmlspecialchars($clientName) . "' added successfully!";
-                        $feedback_type = 'success';
-                        // $action = 'list'; // Go back to list view - or stay to add contacts? For now, list.
-                    } else {
-                        $feedback_message = "Error adding client: " . $stmt->error;
-                        $feedback_type = 'error';
-                    }
-                    $stmt->close();
-                } else {
-                    $feedback_message = "Database error (prepare insert): " . $conn->error;
-                    $feedback_type = 'error';
-                }
-            }
-        }
-         // To show form again with values if error
-        if($feedback_type == 'error') {
-            $action = $clientCCID ? 'edit' : 'add';
-            $client_id_to_edit = $clientCCID; // Ensure edit form is populated if error on edit
-        }
-
-    } elseif (isset($_POST['add_contact'])) {
-        // --- Add Client Contact ---
-        $contact_ccid = $_POST['contact_ccid'];
-        $contact_name = trim($_POST['contact_name']);
-        $contact_email = trim($_POST['contact_email']);
-        $contact_phone = trim($_POST['contact_phone']);
-
-        if (empty($contact_name) || empty($contact_ccid)) {
-            $feedback_message = "Contact Name and Client ID are required.";
-            $feedback_type = 'error';
-        } elseif (!empty($contact_email) && !filter_var($contact_email, FILTER_VALIDATE_EMAIL)) {
-            $feedback_message = "Invalid Contact Email format.";
-            $feedback_type = 'error';
-        } else {
-            // Verify $contact_ccid belongs to $currentCompanyID for security
-            $verifyStmt = $conn->prepare("SELECT CCID FROM client WHERE CCID = ? AND AddedByCompanyID = ?");
-            if ($verifyStmt) {
-                $verifyStmt->bind_param("ii", $contact_ccid, $currentCompanyID);
-                $verifyStmt->execute();
-                if ($verifyStmt->get_result()->num_rows > 0) {
-                    $stmt = $conn->prepare("INSERT INTO client_contacts (CCID, ContactName, Email, PhoneNumber) VALUES (?, ?, ?, ?)");
-                    if ($stmt) {
-                        $stmt->bind_param("isss", $contact_ccid, $contact_name, $contact_email, $contact_phone);
-                        if ($stmt->execute()) {
-                            $feedback_message = "Contact '" . htmlspecialchars($contact_name) . "' added successfully!";
-                            $feedback_type = 'success';
-                        } else {
-                            $feedback_message = "Error adding contact: " . $stmt->error;
-                            $feedback_type = 'error';
-                        }
-                        $stmt->close();
-                    } else {
-                         $feedback_message = "Database error (prepare insert contact): " . $conn->error;
-                         $feedback_type = 'error';
-                    }
-                } else {
-                    $feedback_message = "Client not found or you do not have permission to add contacts to it.";
-                    $feedback_type = 'error';
-                }
-                $verifyStmt->close();
-            } else {
-                $feedback_message = "Database error (verify client for contact): " . $conn->error;
-                $feedback_type = 'error';
-            }
-        }
-        $action = 'edit'; // Stay on edit client page to see the contact list updated
-        $client_id_to_edit = $contact_ccid; // Ensure we are editing the correct client
-    }
-}
-
-
-// --- Handle Delete Action ---
-if ($action === 'delete' && $client_id_to_edit && $currentCompanyID) {
-    // First, delete associated client_contacts (or set ON DELETE CASCADE in DB)
-    $stmt_del_contacts = $conn->prepare("DELETE FROM client_contacts WHERE CCID = ?");
-    if ($stmt_del_contacts) {
-        $stmt_del_contacts->bind_param("i", $client_id_to_edit);
-        // We need to ensure this client belongs to the company before deleting contacts
-        // This is implicitly handled by the client delete check below, but could be explicit here.
-        // For now, assume cascade or client delete will fail if contacts exist and no cascade.
-        $stmt_del_contacts->execute();
-        $stmt_del_contacts->close();
-    } else {
-        // Log error, but attempt to delete client anyway or handle more gracefully
-        error_log("Error preparing to delete client contacts: " . $conn->error);
-    }
-
-
-    $stmt = $conn->prepare("DELETE FROM client WHERE CCID = ? AND AddedByCompanyID = ?");
-    if ($stmt) {
-        $stmt->bind_param("ii", $client_id_to_edit, $currentCompanyID);
-        if ($stmt->execute()) {
-            if ($stmt->affected_rows > 0) {
-                $feedback_message = "Client deleted successfully!";
-                $feedback_type = 'success';
-            } else {
-                $feedback_message = "Client not found or you do not have permission to delete it.";
-                $feedback_type = 'error';
-            }
-        } else {
-            $feedback_message = "Error deleting client: " . $stmt->error;
-            $feedback_type = 'error';
-        }
-        $stmt->close();
-    } else {
-        $feedback_message = "Database error (prepare delete): " . $conn->error;
-        $feedback_type = 'error';
-    }
-    $action = 'list'; // Go back to list view
-}
-
-// --- Data for Display (List or Edit Form) ---
-$clients_list = [];
-$client_to_edit_data = null;
-$client_contacts_list = [];
-
-if ($currentCompanyID && $action !== 'error_state') {
-    if ($action === 'list' || $action === 'delete') { // Fetch list after delete as well
-        $stmt_list = $conn->prepare("SELECT c.CCID, c.ClientID, c.CompanyName, c.Email, COUNT(cc.CCCID) as ContactCount
-                                     FROM client c
-                                     LEFT JOIN client_contacts cc ON c.CCID = cc.CCID
-                                     WHERE c.AddedByCompanyID = ?
-                                     GROUP BY c.CCID, c.ClientID, c.CompanyName, c.Email
-                                     ORDER BY c.CompanyName ASC");
-        if ($stmt_list) {
-            $stmt_list->bind_param("i", $currentCompanyID);
-            $stmt_list->execute();
-            $result_list = $stmt_list->get_result();
-            while ($row = $result_list->fetch_assoc()) {
-                $clients_list[] = $row;
-            }
-            $stmt_list->close();
-        } else {
-            $feedback_message = "Error fetching client list: " . $conn->error;
-            $feedback_type = 'error';
-        }
-    }
-
-    if (($action === 'edit' || $action === 'add_contact_form') && $client_id_to_edit) {
-        $stmt_edit = $conn->prepare("SELECT CCID, ClientID, CompanyName, Email, Address FROM client WHERE CCID = ? AND AddedByCompanyID = ?");
-        if ($stmt_edit) {
-            $stmt_edit->bind_param("ii", $client_id_to_edit, $currentCompanyID);
-            $stmt_edit->execute();
-            $result_edit = $stmt_edit->get_result();
-            if ($result_edit->num_rows > 0) {
-                $client_to_edit_data = $result_edit->fetch_assoc();
-
-                // Fetch contacts for this client
-                $stmt_contacts = $conn->prepare("SELECT CCCID, ContactName, Email, PhoneNumber FROM client_contacts WHERE CCID = ? ORDER BY ContactName ASC");
-                if ($stmt_contacts) {
-                    $stmt_contacts->bind_param("i", $client_id_to_edit);
-                    $stmt_contacts->execute();
-                    $result_contacts = $stmt_contacts->get_result();
-                    while ($row_contact = $result_contacts->fetch_assoc()) {
-                        $client_contacts_list[] = $row_contact;
-                    }
-                    $stmt_contacts->close();
-                } else {
-                    $feedback_message = "Error fetching client contacts: " . $conn->error;
-                    $feedback_type = 'error';
-                }
-            } else {
-                $feedback_message = "Client not found or you do not have permission to edit it.";
-                $feedback_type = 'error';
-                $action = 'list'; // Revert to list if client not found for edit
-            }
-            $stmt_edit->close();
-        } else {
-            $feedback_message = "Database error (prepare fetch for edit): " . $conn->error;
-            $feedback_type = 'error';
-        }
-    }
-}
 ?>
 
 <style>
+    /* Styles specific to clients.php, can be moved to global style.css if widely used */
     .client-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
     .client-table th, .client-table td { border: 1px solid #ddd; padding: 10px; text-align: left; }
     .client-table th { background-color: #f2f2f2; }
-    .client-table td a { margin-right: 10px; text-decoration: none; }
-    .client-table td .delete-btn { color: red; }
-    .form-container { border:1px solid #ddd; padding:20px; border-radius:5px; margin-top:20px; background-color:#f9f9f9; }
+    .client-table td .action-btn { margin-right: 5px; text-decoration: none; padding: 5px 8px; border-radius: 3px; color: white; font-size:0.9em; cursor:pointer; }
+    .client-table td .edit-btn { background-color: #ffc107; color:black; }
+    .client-table td .delete-btn { background-color: #dc3545; }
+    /* .client-table td .view-contacts-btn { background-color: #17a2b8; } */ /* Combined with edit */
+
+
+    .form-modal {
+        display: none; /* Hidden by default */
+        position: fixed;
+        z-index: 1000; /* Sit on top */
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto; /* Enable scroll if needed */
+        background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+    }
+
+    .form-modal-content {
+        background-color: #fefefe;
+        margin: 10% auto; /* 10% from the top and centered */
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+        max-width: 600px;
+        border-radius: 8px;
+        position: relative;
+    }
+
+    .form-modal .close-btn-modal { /* Renamed to avoid conflict if other close buttons exist */
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        position: absolute;
+        top: 10px;
+        right: 20px;
+    }
+    .form-modal .close-btn-modal:hover,
+    .form-modal .close-btn-modal:focus {
+        color: black;
+        text-decoration: none;
+        cursor: pointer;
+    }
+
     .form-container legend { font-size: 1.2em; font-weight: bold; margin-bottom: 10px; }
     .form-container label { display: block; margin-bottom: 5px; font-weight: bold; }
     .form-container input[type="text"],
@@ -267,182 +65,590 @@ if ($currentCompanyID && $action !== 'error_state') {
         width: calc(100% - 22px); padding: 10px; margin-bottom: 15px;
         border: 1px solid #ccc; border-radius: 4px;
     }
-    .form-container button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-    .form-container button:hover { background-color: #0056b3; }
-    .form-container .cancel-btn { background-color: #6c757d; margin-left:10px; }
-    .contacts-section { margin-top: 30px; }
-    .contacts-section h4 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
+    .form-container button[type="submit"] { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .form-container .cancel-btn-modal { background-color: #6c757d; margin-left:10px; color:white; padding: 10px 15px; border:none; border-radius:4px; cursor:pointer;}
+
+    #client-contacts-section h4 { border-bottom: 1px solid #eee; padding-bottom: 5px; margin-top:20px; }
+    #client-contacts-list { list-style-type: none; padding-left: 0; }
+    #client-contacts-list li { background-color: #f9f9f9; border:1px solid #eee; padding:8px; margin-bottom:5px; border-radius:3px; display:flex; justify-content:space-between; align-items:center; }
+    #client-contacts-list li .contact-actions button { font-size:0.8em; padding:3px 6px; margin-left:5px; }
+
+    /* General button styling from style.css might be button.button or input[type=button] */
+    button.action-btn { /* For general action buttons if not input type submit */
+        text-decoration:none; color:white; padding:8px 12px; border-radius:4px; border:none; cursor:pointer;
+    }
 </style>
 
 <h2 class="page-title">Manage Clients</h2>
 
-<?php if ($feedback_message): ?>
-    <div class="message <?php echo ($feedback_type === 'success') ? 'success-message' : 'error-message'; ?>">
-        <?php echo htmlspecialchars($feedback_message); ?>
-    </div>
-<?php endif; ?>
+<div id="client-feedback-message" class="message" style="display: none;"></div>
+
+<p style="margin-top:20px;">
+    <button type="button" id="show-add-client-form-btn" class="action-btn" style="background-color: #28a745;">+ Add New Client</button>
+</p>
+
+<div id="client-list-container">
+    <table class="client-table">
+        <thead>
+            <tr>
+                <th>Client ID (System)</th>
+                <th>Company Name</th>
+                <th>Email</th>
+                <th>Contacts Count</th> <!-- JS will fill this based on API response -->
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="clients-table-body">
+            <tr><td colspan="5" style="text-align:center;">Loading clients...</td></tr>
+        </tbody>
+    </table>
+</div>
 
 
-<?php if ($action === 'add' || ($action === 'edit' && $client_to_edit_data)): ?>
-    <div class="form-container">
-        <form action="clients.php<?php echo $client_to_edit_data ? '?action=edit&id='.$client_to_edit_data['CCID'] : '?action=add'; ?>" method="POST">
+<!-- Add/Edit Client Modal -->
+<div id="client-form-modal" class="form-modal">
+    <div class="form-modal-content">
+        <span class="close-btn-modal" id="close-client-modal-btn">&times;</span>
+        <form id="client-form" class="form-container">
             <fieldset>
-                <legend><?php echo ($action === 'add') ? 'Add New Client' : 'Edit Client: ' . htmlspecialchars($client_to_edit_data['CompanyName']); ?></legend>
-
-                <?php if ($action === 'edit'): ?>
-                    <input type="hidden" name="ccid" value="<?php echo htmlspecialchars($client_to_edit_data['CCID']); ?>">
-                    <p><strong>Client ID:</strong> <?php echo htmlspecialchars($client_to_edit_data['ClientID']); ?></p>
-                <?php endif; ?>
-
+                <legend id="client-form-legend">Add New Client</legend>
+                <input type="hidden" id="client-form-ccid" name="ccid">
                 <div>
-                    <label for="clientName">Company Name:</label>
-                    <input type="text" id="clientName" name="clientName" value="<?php echo htmlspecialchars($client_to_edit_data['CompanyName'] ?? ($_POST['clientName'] ?? '')); ?>" required>
+                    <label for="client-form-clientName">Company Name:</label>
+                    <input type="text" id="client-form-clientName" name="clientName" required>
                 </div>
                 <div>
-                    <label for="clientEmail">Email:</label>
-                    <input type="email" id="clientEmail" name="clientEmail" value="<?php echo htmlspecialchars($client_to_edit_data['Email'] ?? ($_POST['clientEmail'] ?? '')); ?>">
+                    <label for="client-form-clientEmail">Email:</label>
+                    <input type="email" id="client-form-clientEmail" name="clientEmail">
                 </div>
                 <div>
-                    <label for="clientAddress">Address:</label>
-                    <textarea id="clientAddress" name="clientAddress" rows="3"><?php echo htmlspecialchars($client_to_edit_data['Address'] ?? ($_POST['clientAddress'] ?? '')); ?></textarea>
+                    <label for="client-form-clientAddress">Address:</label>
+                    <textarea id="client-form-clientAddress" name="clientAddress" rows="3"></textarea>
                 </div>
-                <button type="submit" name="save_client"><?php echo ($action === 'add') ? 'Add Client' : 'Save Changes'; ?></button>
-                <a href="clients.php" class="button cancel-btn" style="text-decoration:none;">Cancel</a>
+                <button type="submit" id="save-client-btn">Save Client</button>
+                <button type="button" class="cancel-btn-modal" id="cancel-client-form-btn">Cancel</button>
             </fieldset>
         </form>
 
-        <?php if ($action === 'edit' && $client_to_edit_data): ?>
-        <div class="contacts-section">
-            <h4>Manage Contacts for <?php echo htmlspecialchars($client_to_edit_data['CompanyName']); ?></h4>
-            <?php if (!empty($client_contacts_list)): ?>
-                <table class="client-table" style="font-size:0.9em;">
-                    <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Actions</th></tr></thead>
-                    <tbody>
-                    <?php foreach($client_contacts_list as $contact): ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($contact['ContactName']); ?></td>
-                            <td><?php echo htmlspecialchars($contact['Email']); ?></td>
-                            <td><?php echo htmlspecialchars($contact['PhoneNumber']); ?></td>
-                            <td>
-                                <a href="clients.php?action=edit_contact&contact_id=<?php echo $contact['CCCID']; ?>&client_id=<?php echo $client_to_edit_data['CCID']; ?>">Edit</a>
-                                <a href="clients.php?action=delete_contact&contact_id=<?php echo $contact['CCCID']; ?>&client_id=<?php echo $client_to_edit_data['CCID']; ?>"
-                                   class="delete-btn" onclick="return confirm('Are you sure you want to delete this contact?');">Delete</a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php else: ?>
-                <p>No contacts found for this client.</p>
-            <?php endif; ?>
-
-            <div class="form-container" style="margin-top:20px; background-color:#fff;">
-                 <form action="clients.php?action=edit&id=<?php echo $client_to_edit_data['CCID']; ?>" method="POST">
-                    <input type="hidden" name="contact_ccid" value="<?php echo $client_to_edit_data['CCID']; ?>">
+        <!-- Contacts section - only shown when editing a client -->
+        <div id="client-contacts-section" style="display: none; margin-top:25px;">
+            <h4>Manage Contacts for <span id="contacts-for-client-name-span"></span></h4>
+            <ul id="client-contacts-list">
+                <!-- Contacts will be listed here: <li>Name (Email) <button>Delete</button></li> -->
+            </ul>
+            <div class="form-container" style="margin-top:10px; background-color:#f0f0f0; padding:15px; border-radius:4px;">
+                 <form id="add-contact-form">
+                    <!-- ccid for this contact will be set programmatically when edit modal opens -->
+                    <input type="hidden" id="contact-form-current-client-ccid" name="contact_client_ccid">
                     <fieldset>
                         <legend>Add New Contact</legend>
-                        <div><label for="contact_name">Contact Name:</label><input type="text" name="contact_name" required></div>
-                        <div><label for="contact_email">Contact Email:</label><input type="email" name="contact_email"></div>
-                        <div><label for="contact_phone">Contact Phone:</label><input type="text" name="contact_phone"></div>
-                        <button type="submit" name="add_contact">Add Contact</button>
+                        <div><label for="contact-form-name">Contact Name:</label><input type="text" id="contact-form-name" name="contact_name" required></div>
+                        <div><label for="contact-form-email">Contact Email:</label><input type="email" id="contact-form-email" name="contact_email"></div>
+                        <div><label for="contact-form-phone">Contact Phone:</label><input type="text" id="contact-form-phone" name="contact_phone"></div>
+                        <button type="submit" id="add-contact-btn">Add Contact</button>
                     </fieldset>
                 </form>
             </div>
         </div>
-        <?php endif; // End edit client section for contacts ?>
     </div>
-<?php endif; ?>
+</div>
 
+<!-- JavaScript for API interactions will go here in the next step -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof APP_CONFIG === 'undefined' || !APP_CONFIG.baseApiUrl) {
+        console.error('APP_CONFIG with baseApiUrl is not defined. Ensure header.php includes it.');
+        const feedbackDiv = document.getElementById('client-feedback-message');
+        feedbackDiv.textContent = 'Application configuration error. Cannot load clients.';
+        feedbackDiv.className = 'message error-message';
+        feedbackDiv.style.display = 'block';
+        // Clear loading message from table
+        const tableBody = document.getElementById('clients-table-body');
+        if(tableBody) tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:red;">App Config Error</td></tr>';
+        return;
+    }
 
-<?php if ($action === 'list' && $currentCompanyID && $action !== 'error_state'): ?>
-    <p style="margin-top:20px;">
-        <a href="clients.php?action=add" class="button" style="text-decoration:none; background-color: #28a745; color:white; padding:10px 15px; border-radius:4px;">+ Add New Client</a>
-    </p>
+    const clientsTableBody = document.getElementById('clients-table-body');
+    const feedbackMessageDiv = document.getElementById('client-feedback-message');
 
-    <?php if (!empty($clients_list)): ?>
-    <table class="client-table">
-        <thead>
-            <tr>
-                <th>Client ID</th>
-                <th>Company Name</th>
-                <th>Email</th>
-                <th>Contacts</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php foreach ($clients_list as $client): ?>
-            <tr>
-                <td><?php echo htmlspecialchars($client['ClientID']); ?></td>
-                <td><?php echo htmlspecialchars($client['CompanyName']); ?></td>
-                <td><?php echo htmlspecialchars($client['Email']); ?></td>
-                <td><?php echo $client['ContactCount']; ?></td>
-                <td>
-                    <a href="clients.php?action=edit&id=<?php echo $client['CCID']; ?>" class="button" style="background-color:#ffc107; color:black; padding:5px 10px; border-radius:3px;">Edit / View Contacts</a>
-                    <a href="clients.php?action=delete&id=<?php echo $client['CCID']; ?>" class="delete-btn"
-                       onclick="return confirm('Are you sure you want to delete this client and all their contacts? This action cannot be undone.');">Delete</a>
-                </td>
-            </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-    <?php else: ?>
-        <p style="margin-top:20px;">No clients found. <a href="clients.php?action=add">Add your first client!</a></p>
-    <?php endif; ?>
-<?php elseif ($action === 'list' && !$currentCompanyID && $action !== 'error_state'): ?>
-    <p class="message error-message">Could not determine your company to list clients.</p>
-<?php endif; ?>
+    function displayFeedback(message, type = 'error') {
+        feedbackMessageDiv.textContent = message;
+        feedbackMessageDiv.className = `message ${type === 'success' ? 'success-message' : 'error-message'}`;
+        feedbackMessageDiv.style.display = 'block';
+    }
 
+    function fetchClients() {
+        clientsTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading clients...</td></tr>';
+        const authToken = localStorage.getItem('authToken');
+        if (!authToken) {
+            displayFeedback('Authentication token not found. Please login again.');
+            // Potentially redirect to login: window.location.href = APP_CONFIG.baseUrl + '/login';
+            clientsTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:red;">Not Authenticated</td></tr>';
+            return;
+        }
 
-<?php
-// Placeholder for handling edit_contact and delete_contact actions if implemented on this page
-if (($action === 'edit_contact' || $action === 'delete_contact') && isset($_GET['contact_id'])) {
-    $contact_id_to_manage = $_GET['contact_id'];
-    $client_id_for_contact = $_GET['client_id'] ?? null;
-    // TODO: Implement contact edit form loading / contact deletion logic here
-    // For now, just a message and redirect back to client edit page.
-    if($action === 'delete_contact' && $client_id_for_contact && $contact_id_to_manage && $currentCompanyID) {
-        // Verify client ownership before deleting contact
-        $verifyStmt = $conn->prepare("SELECT cl.CCID FROM client cl JOIN client_contacts cc ON cl.CCID = cc.CCID WHERE cc.CCCID = ? AND cl.AddedByCompanyID = ?");
-        if($verifyStmt){
-            $verifyStmt->bind_param("ii", $contact_id_to_manage, $currentCompanyID);
-            $verifyStmt->execute();
-            if($verifyStmt->get_result()->num_rows > 0){
-                $stmt_del_single_contact = $conn->prepare("DELETE FROM client_contacts WHERE CCCID = ?");
-                if($stmt_del_single_contact){
-                    $stmt_del_single_contact->bind_param("i", $contact_id_to_manage);
-                    if($stmt_del_single_contact->execute()){
-                        $feedback_message = "Contact deleted successfully.";
-                        $feedback_type = 'success';
-                    } else {
-                        $feedback_message = "Error deleting contact: " . $stmt_del_single_contact->error;
-                        $feedback_type = 'error';
-                    }
-                    $stmt_del_single_contact->close();
+        fetch(APP_CONFIG.baseApiUrl + '/clients', {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.status === 401) { // Unauthorized
+                localStorage.removeItem('authToken');
+                window.dispatchEvent(new CustomEvent('authChange'));
+                throw new Error('Session expired or invalid. Please login again.');
+            }
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || errData.message || `Failed to load clients: ${response.status}`);
+                }).catch(() => new Error(`Failed to load clients: ${response.status} ${response.statusText}`));
+            }
+            return response.json();
+        })
+        .then(data => {
+            clientsTableBody.innerHTML = ''; // Clear loading message
+            if (data.success && Array.isArray(data.clients)) {
+                if (data.clients.length === 0) {
+                    clientsTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No clients found. Add your first client!</td></tr>';
                 } else {
-                    $feedback_message = "DB error (prepare delete contact): " . $conn->error;
-                    $feedback_type = 'error';
+                    data.clients.forEach(client => {
+                        const row = clientsTableBody.insertRow();
+                        row.insertCell().textContent = client.ccid || client.id || 'N/A'; // Assuming API returns ccid or id
+                        row.insertCell().textContent = client.companyName || 'N/A';
+                        row.insertCell().textContent = client.email || 'N/A';
+                        row.insertCell().textContent = client.contactCount || 0; // Assuming API returns contactCount
+
+                        const actionsCell = row.insertCell();
+                        actionsCell.innerHTML = `
+                            <button class="action-btn edit-btn" data-client-id="${client.ccid || client.id}">Edit/Contacts</button>
+                            <button class="action-btn delete-btn" data-client-id="${client.ccid || client.id}">Delete</button>
+                        `;
+                    });
                 }
             } else {
-                $feedback_message = "Contact not found or permission denied.";
-                $feedback_type = 'error';
+                throw new Error(data.error || data.message || 'Invalid data received for clients.');
             }
-            $verifyStmt->close();
-        } else {
-            $feedback_message = "DB error (verify contact for delete): " . $conn->error;
-            $feedback_type = 'error';
-        }
-        // Redirect back to the edit client page
-        // Using JS for this to ensure feedback message is shown by header.php if it's set before header include.
-        // Or rather, set action and client_id_to_edit and let the page reload that section.
-        echo "<script>window.location.href = 'clients.php?action=edit&id=" . urlencode($client_id_for_contact) . "&feedback=" . urlencode($feedback_message) . "&feedback_type=" .urlencode($feedback_type) . "';</script>";
-        exit; // Stop further script execution
-    } else {
-        echo "<p class='message info-message'>Contact editing/deletion for contact ID {$contact_id_to_manage} would be handled here. <a href='clients.php?action=edit&id={$client_id_for_contact}'>Back to client</a></p>";
+        })
+        .catch(error => {
+            console.error('Error fetching clients:', error);
+            clientsTableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red;">Error loading clients: ${error.message}</td></tr>`;
+            if (error.message.includes("Session expired")) {
+                // Optional: redirect to login after a short delay
+                // setTimeout(() => { window.location.href = APP_CONFIG.baseUrl + '/login?session_expired=true'; }, 2000);
+            }
+        });
     }
-}
+
+    // Initial load of clients
+    fetchClients();
+
+    // --- Modal handling basic logic (from previous step, ensure it's here) ---
+    const clientModal = document.getElementById('client-form-modal');
+    // Ensure other modal related consts are defined if they were separate
+    // const showAddClientBtn = ... , const closeClientModalBtn = ..., const cancelClientFormBtn = ...
+    // --- Modal handling basic logic ---
+    const clientModal = document.getElementById('client-form-modal');
+    const clientForm = document.getElementById('client-form');
+    const clientFormLegend = document.getElementById('client-form-legend');
+    const clientFormCcidInput = document.getElementById('client-form-ccid');
+    const clientContactsSection = document.getElementById('client-contacts-section');
+    const saveClientBtn = document.getElementById('save-client-btn');
+
+    const showAddClientBtn = document.getElementById('show-add-client-form-btn');
+    const closeClientModalBtn = document.getElementById('close-client-modal-btn');
+    const cancelClientFormBtn = document.getElementById('cancel-client-form-btn');
+
+    function openClientModalForAdd() {
+        clientFormLegend.textContent = 'Add New Client';
+        clientForm.reset();
+        clientFormCcidInput.value = ''; // Ensure no ID for add mode
+        clientContactsSection.style.display = 'none'; // Hide contacts for new client
+        saveClientBtn.textContent = 'Add Client';
+        displayFeedback('', 'success'); // Clear previous feedback
+        clientModal.style.display = 'block';
+    }
+
+    function closeClientModal() {
+        clientModal.style.display = 'none';
+        clientForm.reset(); // Reset form when closing
+    }
+
+    showAddClientBtn.addEventListener('click', openClientModalForAdd);
+    closeClientModalBtn.addEventListener('click', closeClientModal);
+    cancelClientFormBtn.addEventListener('click', closeClientModal);
+    window.addEventListener('click', function(event) { // Close if clicked outside modal content
+        if (event.target == clientModal) {
+            closeClientModal();
+        }
+    });
+
+    // --- Handle Add/Edit Client Form Submission ---
+    clientForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const ccid = clientFormCcidInput.value;
+        const isEditMode = !!ccid;
+
+        const clientName = document.getElementById('client-form-clientName').value.trim();
+        const clientEmail = document.getElementById('client-form-clientEmail').value.trim();
+        const clientAddress = document.getElementById('client-form-clientAddress').value.trim();
+
+        // Basic Client-side validation
+        if (!clientName) {
+            alert('Client Company Name is required.'); // Simple alert for now
+            return;
+        }
+        if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+            alert('Invalid email format for client.');
+            return;
+        }
+
+        const payload = { clientName, clientEmail, clientAddress };
+        const apiUrl = isEditMode ? `${APP_CONFIG.baseApiUrl}/clients/${ccid}` : `${APP_CONFIG.baseApiUrl}/clients`;
+        const apiMethod = isEditMode ? 'PUT' : 'POST';
+
+        const originalButtonText = saveClientBtn.textContent;
+        saveClientBtn.textContent = 'Saving...';
+        saveClientBtn.disabled = true;
+
+        const authToken = localStorage.getItem('authToken');
+        if (!authToken) {
+            displayFeedback('Authentication error. Please login again.');
+            saveClientBtn.textContent = originalButtonText;
+            saveClientBtn.disabled = false;
+            return;
+        }
+
+        fetch(apiUrl, {
+            method: apiMethod,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => {
+            if (response.status === 401) {
+                localStorage.removeItem('authToken');
+                window.dispatchEvent(new CustomEvent('authChange'));
+                throw new Error('Session expired. Please login again.');
+            }
+            if (!response.ok) {
+                 return response.json().then(errData => {
+                    throw new Error(errData.error || errData.message || `Operation failed: ${response.status}`);
+                }).catch(() => new Error(`Operation failed: ${response.status} ${response.statusText}`));
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                displayFeedback(data.message || `Client ${isEditMode ? 'updated' : 'added'} successfully!`, 'success');
+                closeClientModal();
+                fetchClients(); // Refresh the client list
+            } else {
+                throw new Error(data.error || data.message || `Failed to ${isEditMode ? 'update' : 'add'} client.`);
+            }
+        })
+        .catch(error => {
+            console.error(`Error ${isEditMode ? 'updating' : 'adding'} client:`, error);
+            // Display error inside the modal or as a general feedback message
+            alert(`Error: ${error.message}`); // Simple alert for now, can integrate with modal's own error display
+            displayFeedback(`Error: ${error.message}`, 'error');
+        })
+        .finally(() => {
+            saveClientBtn.textContent = originalButtonText;
+            saveClientBtn.disabled = false;
+        });
+    });
+
+    // --- Event Delegation for Edit/Delete buttons on Client Table ---
+    clientsTableBody.addEventListener('click', function(event) {
+        const target = event.target;
+        const clientId = target.dataset.clientId;
+
+        if (target.classList.contains('edit-btn') && clientId) {
+            openClientModalForEdit(clientId);
+        } else if (target.classList.contains('delete-btn') && clientId) {
+            handleDeleteClient(clientId, target.closest('tr').querySelector('td:nth-child(2)').textContent); // Pass name for confirm message
+        }
+    });
+
+    function handleDeleteClient(ccid, clientName) {
+        if (!confirm(`Are you sure you want to delete client "${clientName}" (ID: ${ccid})? This action cannot be undone and will also delete all associated contacts.`)) {
+            return;
+        }
+
+        displayFeedback('Deleting client...', 'info'); // Show an info message
+        const authToken = localStorage.getItem('authToken');
+        if (!authToken) {
+            displayFeedback('Authentication error. Please login again.');
+            return;
+        }
+
+        fetch(`${APP_CONFIG.baseApiUrl}/clients/${ccid}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.status === 401) { /* ... (auth error handling) ... */ throw new Error('Session expired.'); }
+            // DELETE might return 204 No Content on success, or JSON
+            if (response.status === 204) { // Successfully deleted, no content
+                return { success: true, message: `Client "${clientName}" deleted successfully.` };
+            }
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || errData.message || `Failed to delete client: ${response.status}`);
+                }).catch(() => new Error(`Failed to delete client: ${response.status} ${response.statusText}`));
+            }
+            return response.json(); // If API returns JSON on successful delete
+        })
+        .then(data => {
+            if (data.success) {
+                displayFeedback(data.message || `Client "${clientName}" deleted successfully.`, 'success');
+                fetchClients(); // Refresh the client list
+            } else {
+                throw new Error(data.error || data.message || 'Failed to delete client.');
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting client:', error);
+            displayFeedback(`Error deleting client: ${error.message}`, 'error');
+        });
+    }
 
 
-$conn->close();
+    function openClientModalForEdit(ccid) {
+        clientFormLegend.textContent = 'Loading client data...';
+        clientForm.reset();
+        clientFormCcidInput.value = ccid; // Set ID for edit mode
+        saveClientBtn.textContent = 'Save Changes';
+        clientContactsSection.style.display = 'block'; // Show contacts section
+        document.getElementById('contacts-for-client-name-span').textContent = '...';
+        document.getElementById('client-contacts-list').innerHTML = '<li>Loading contacts...</li>';
+        document.getElementById('contact-form-current-client-ccid').value = ccid;
+        displayFeedback('', 'success'); // Clear global feedback
+        clientModal.style.display = 'block';
+
+        const authToken = localStorage.getItem('authToken');
+        if (!authToken) {
+            displayFeedback('Authentication error. Please login again.');
+            closeClientModal();
+            return;
+        }
+
+        // Fetch client details (which should include contacts as per API design assumption)
+        fetch(`${APP_CONFIG.baseApiUrl}/clients/${ccid}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.status === 401) { /* ... (auth error handling as in fetchClients) ... */ throw new Error('Session expired.'); }
+            if (!response.ok) { /* ... (general error handling as in fetchClients) ... */ throw new Error('Failed to fetch client details.'); }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success && data.client) {
+                const client = data.client;
+                clientFormLegend.textContent = `Edit Client: ${client.companyName}`;
+                document.getElementById('client-form-clientName').value = client.companyName || '';
+                document.getElementById('client-form-clientEmail').value = client.email || '';
+                document.getElementById('client-form-clientAddress').value = client.address || '';
+                document.getElementById('contacts-for-client-name-span').textContent = client.companyName || 'Selected Client';
+
+                // Render contacts
+                renderClientContacts(client.contacts || []);
+            } else {
+                throw new Error(data.error || data.message || 'Could not load client details.');
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching client for edit:', error);
+            displayFeedback(`Error: ${error.message}`, 'error');
+            closeClientModal(); // Close modal on error fetching details
+        });
+    }
+
+    function renderClientContacts(contacts) {
+        const contactsListUl = document.getElementById('client-contacts-list');
+        contactsListUl.innerHTML = ''; // Clear previous contacts or loading message
+
+        if (!contacts || contacts.length === 0) {
+            contactsListUl.innerHTML = '<li>No contacts found for this client.</li>';
+            return;
+        }
+
+        contacts.forEach(contact => {
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <span>
+                    <strong>${contact.contactName || 'N/A'}</strong>
+                    (${contact.email || 'No Email'}) - ${contact.phoneNumber || 'No Phone'}
+                </span>
+                <span class="contact-actions">
+                    <button type="button" class="action-btn edit-contact-btn" data-contact-id="${contact.cccid || contact.id}" data-client-id="${contact.ccid}" style="background-color:#ffc107; color:black;">Edit</button>
+                    <button type="button" class="action-btn delete-contact-btn" data-contact-id="${contact.cccid || contact.id}" data-client-id="${contact.ccid}" style="background-color:#dc3545;">Delete</button>
+                </span>
+            `;
+            contactsListUl.appendChild(li);
+        });
+        // Add event listeners for new contact edit/delete buttons here or via delegation
+    }
+
+
+    // --- Add Contact Form Submission (inside modal) ---
+    // --- Add Contact Form Submission (inside modal) ---
+    const addContactForm = document.getElementById('add-contact-form');
+    const addContactBtn = document.getElementById('add-contact-btn');
+
+    addContactForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const clientCcid = document.getElementById('contact-form-current-client-ccid').value;
+        const contactName = document.getElementById('contact-form-name').value.trim();
+        const contactEmail = document.getElementById('contact-form-email').value.trim();
+        const contactPhone = document.getElementById('contact-form-phone').value.trim();
+
+        if (!clientCcid) {
+            alert('Error: Client ID is missing for adding contact.');
+            return;
+        }
+        if (!contactName) {
+            alert('Contact Name is required.');
+            document.getElementById('contact-form-name').focus();
+            return;
+        }
+        if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+            alert('Invalid email format for contact.');
+            document.getElementById('contact-form-email').focus();
+            return;
+        }
+
+        const payload = { contactName, contactEmail, contactPhone };
+        const originalButtonText = addContactBtn.textContent;
+        addContactBtn.textContent = 'Adding...';
+        addContactBtn.disabled = true;
+
+        const authToken = localStorage.getItem('authToken');
+        if (!authToken) {
+            displayFeedback('Authentication error. Please login again.'); // Use global feedback
+            addContactBtn.textContent = originalButtonText;
+            addContactBtn.disabled = false;
+            return;
+        }
+
+        fetch(`${APP_CONFIG.baseApiUrl}/clients/${clientCcid}/contacts`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => {
+            if (response.status === 401) { /* ... */ throw new Error('Session expired.'); }
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || errData.message || `Failed to add contact: ${response.status}`);
+                }).catch(() => new Error(`Failed to add contact: ${response.status} ${response.statusText}`));
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                displayFeedback(data.message || 'Contact added successfully!', 'success');
+                addContactForm.reset();
+                // Refresh contacts list for the current client
+                // Assuming API for GET /clients/{ccid} returns the updated client with contacts
+                openClientModalForEdit(clientCcid); // This will re-fetch and re-render
+            } else {
+                throw new Error(data.error || data.message || 'Failed to add contact.');
+            }
+        })
+        .catch(error => {
+            console.error('Error adding contact:', error);
+            // Display error. Could be a specific div within the contacts section or global.
+            alert(`Error adding contact: ${error.message}`); // Simple alert for now
+            displayFeedback(`Error adding contact: ${error.message}`, 'error');
+        })
+        .finally(() => {
+            addContactBtn.textContent = originalButtonText;
+            addContactBtn.disabled = false;
+        });
+    });
+
+
+    // --- Event Delegation for Contact Actions (Delete/Edit) ---
+    document.getElementById('client-contacts-list').addEventListener('click', function(event) {
+        const target = event.target.closest('button.action-btn'); // Ensure we get the button
+        if (!target) return;
+
+        const contactId = target.dataset.contactId;
+        const clientId = target.dataset.clientId;
+
+        if (target.classList.contains('edit-contact-btn') && contactId) {
+            alert(`Edit contact ID: ${contactId} for client ID: ${clientId} - to be implemented.`);
+            // TODO: Implement edit contact:
+            // 1. Fetch contact details (or have them already if GET /clients/{id} returns full contact objects)
+            // 2. Populate a form (could reuse add-contact-form or a new one)
+            // 3. Submit PUT request to /clients/{clientId}/contacts/{contactId}
+        } else if (target.classList.contains('delete-contact-btn') && contactId) {
+            handleDeleteClientContact(clientId, contactId, target.closest('li').querySelector('strong').textContent);
+        }
+    });
+
+    function handleDeleteClientContact(clientId, contactId, contactName) {
+        if (!confirm(`Are you sure you want to delete contact "${contactName}" (ID: ${contactId})?`)) {
+            return;
+        }
+        displayFeedback('Deleting contact...', 'info');
+        const authToken = localStorage.getItem('authToken');
+        // ... (Auth token check as in other functions) ...
+        if (!authToken) { displayFeedback('Auth error.'); return; }
+
+
+        fetch(`${APP_CONFIG.baseApiUrl}/clients/${clientId}/contacts/${contactId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.status === 401) { /* ... */ throw new Error('Session expired.'); }
+            if (response.status === 204) { // No Content success
+                return { success: true, message: `Contact "${contactName}" deleted.` };
+            }
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || errData.message || `Failed to delete contact: ${response.status}`);
+                }).catch(() => new Error(`Failed to delete contact: ${response.status} ${response.statusText}`));
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                displayFeedback(data.message || 'Contact deleted successfully.', 'success');
+                openClientModalForEdit(clientId); // Refresh contacts list by re-fetching client
+            } else {
+                throw new Error(data.error || data.message || 'Failed to delete contact.');
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting contact:', error);
+            displayFeedback(`Error deleting contact: ${error.message}`, 'error');
+        });
+    }
+});
+</script>
+
+<?php
 require_once __DIR__ . '/../templates/footer.php';
 ?>
