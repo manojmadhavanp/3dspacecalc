@@ -11,8 +11,15 @@ define('RAZORPAY_KEY_ID', 'YOUR_TEST_KEY_ID'); // Example: rzp_test_12345
 define('RAZORPAY_KEY_SECRET', 'YOUR_TEST_KEY_SECRET'); // Example: abcXYZ123
 
 // Application Settings
-define('BASE_URL', 'http://localhost/saas_platform/'); // Adjust as per your local setup
+// IMPORTANT: Adjust BASE_URL to your actual application root URL.
+// It MUST end with a forward slash '/'.
+// Example for local dev: 'http://localhost/your_project_folder/'
+// Example for production: 'https://xactload.hostboxindia.com/'
+define('BASE_URL', 'http://localhost/saas_platform/'); // For frontend non-API URLs
 define('APP_NAME', 'FreightCalc Solutions');
+
+// API Configuration
+define('BASE_API_URL', 'https://xactload.hostboxindia.com/api/v1/'); // MUST end with a slash
 
 // Email Configuration (for password resets, notifications etc. - placeholders)
 define('MAIL_FROM', 'noreply@example.com');

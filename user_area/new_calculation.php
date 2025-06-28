@@ -247,7 +247,8 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('clientId', clientSelect);
         }
 
-        fetch('../api/getitemlist.php', {
+        // Use absolute API path via APP_CONFIG
+        fetch(APP_CONFIG.baseApiUrl + '/calculation/getitemlist', {
             method: 'POST',
             body: formData
             // Headers are not strictly needed for FormData with fetch, browser sets multipart/form-data
@@ -397,9 +398,14 @@ document.addEventListener('DOMContentLoaded', function() {
         reportGenerationStatus.style.display = 'block';
         outputSection.style.display = 'none';
 
-        fetch('../api/generateReport.php', {
+        // Use absolute API path via APP_CONFIG
+        fetch(APP_CONFIG.baseApiUrl + '/calculation/generatereport', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json'
+            // If your API requires an auth token in headers, it should be added here:
+            // 'Authorization': 'Bearer ' + localStorage.getItem('authToken')
+          },
           body: JSON.stringify(reportPayload)
         })
         .then(response => {

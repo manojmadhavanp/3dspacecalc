@@ -1,0 +1,32 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Optional: If your application is in a subdirectory, you might need this
+    # Example: RewriteBase /your_project_folder/
+    # RewriteBase /
+
+    # Redirect trailing slashes to non-slash version (optional, for SEO)
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)/$ /$1 [L,R=301]
+
+    # Handle direct file/directory requests
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Rewrite all other requests to router_index.php
+    RewriteRule ^(.*)$ router_index.php?url=$1 [L,QSA]
+</IfModule>
+
+# Optional: Deny access to sensitive files if they are not meant to be web-accessible
+# For example, if your config.php was in a web-accessible location (it's currently not an issue with our structure)
+# <Files "config.php">
+#    Order Allow,Deny
+#    Deny from all
+# </Files>
+
+# Optional: Improve security by disabling directory listing
+Options -Indexes
+
+# Optional: Set default character set
+AddDefaultCharset UTF-8
