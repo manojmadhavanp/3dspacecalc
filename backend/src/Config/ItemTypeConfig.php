@@ -4,33 +4,27 @@
 namespace App\Config;
 
 class ItemTypeConfig {
-    private static ?array $configData = null;
-    private static float $defaultMaxSupportWeight = 0; // Default if not specified for a type
+    private static ?array $itemTypeProperties = null; // Changed from $configData for clarity
+    private static float $defaultMaxSupportWeightKg = 0;
 
-    /**
-     * Loads item type configurations from a JSON file.
-     * Uses a static cache.
-     *
-     * @param string|null $filePath Path to the item type config JSON.
-     * @throws \Exception If file not found or JSON is invalid.
-     */
     public static function loadConfig(?string $filePath = null): void {
-        if (self::$configData !== null) {
-            return; // Already loaded
+        // Use cache only if the default filepath is being implicitly used
+        if (self::$itemTypeProperties !== null && $filePath === null) {
+            return;
         }
 
-        if ($filePath === null) {
-            // Adjust path as per your project structure
-            $filePath = __DIR__ . '/../../config/item_type_config.json';
+        $effectiveFilePath = $filePath;
+        if ($effectiveFilePath === null) {
+            $effectiveFilePath = getenv('ITEM_TYPE_CONFIG_PATH') ?: __DIR__ . '/../../config/item_type_config.json';
         }
 
-        if (!file_exists($filePath)) {
-            throw new \Exception("Item type configuration file not found at: " . realpath($filePath) ?: $filePath);
+        if (!file_exists($effectiveFilePath)) {
+            throw new \Exception("Item type configuration file not found at: " . realpath($effectiveFilePath) ?: $effectiveFilePath);
         }
 
-        $jsonString = file_get_contents($filePath);
+        $jsonString = file_get_contents($effectiveFilePath);
         if ($jsonString === false) {
-            throw new \Exception("Could not read item type configuration file: $filePath");
+            throw new \Exception("Could not read item type configuration file: $effectiveFilePath");
         }
 
         $decodedData = json_decode($jsonString, true);
@@ -42,41 +36,41 @@ class ItemTypeConfig {
             throw new \Exception("Missing or invalid 'itemTypes' key in item type configuration.");
         }
 
-        self::$configData = $decodedData['itemTypes'];
-        self::$defaultMaxSupportWeight = (float)($decodedData['defaultMaxSupportWeightKg'] ?? 0);
-    }
+        $loadedItemTypeProperties = $decodedData['itemTypes'];
+        $loadedDefaultMaxSupport = (float)($decodedData['defaultMaxSupportWeightKg'] ?? 0);
 
-    /**
-     * Gets the maximum support weight (kg) an item of this type can bear on top of it.
-     *
-     * @param string $itemType The type of the item (e.g., "pallet", "box").
-     * @return float The max support weight in kg.
-     */
-    public static function getMaxSupportWeightKg(string $itemType): float {
-        if (self::$configData === null) {
-            self::loadConfig(); // Ensure config is loaded
+        // Cache only if the default path was used for loading
+        if ($filePath === null) {
+            self::$itemTypeProperties = $loadedItemTypeProperties;
+            self::$defaultMaxSupportWeightKg = $loadedDefaultMaxSupport;
+        } else { // If a specific path is given, return data directly or use for this instance only
+             // For simplicity, this static loader will always set the static props when called with default path.
+             // If called with specific path, it means it's likely for a specific non-default use,
+             // so we don't overwrite the static cache meant for the application's default config.
+             // This part could be redesigned if dynamic config switching per request is needed.
+             // For now, loadConfig() primarily populates the static properties.
+             self::$itemTypeProperties = $loadedItemTypeProperties; // Overwrite for this call if path specified
+             self::$defaultMaxSupportWeightKg = $loadedDefaultMaxSupport;
         }
-        return (float)(self::$configData[$itemType]['maxSupportWeightKg'] ?? self::$defaultMaxSupportWeight);
     }
 
-    /**
-     * Gets a specific configuration property for an item type.
-     *
-     * @param string $itemType The type of the item.
-     * @param string $propertyKey The configuration property key (e.g., "settlingFactor", "isCylindrical").
-     * @param mixed $defaultValue Default value if property not found.
-     * @return mixed The property value or default.
-     */
-    public static function getProperty(string $itemType, string $propertyKey, mixed $defaultValue = null): mixed {
-        if (self::$configData === null) {
+    public static function getMaxSupportWeightKg(string $itemType): float {
+        if (self::$itemTypeProperties === null) {
             self::loadConfig();
         }
-        return self::$configData[$itemType][$propertyKey] ?? $defaultValue;
+        return (float)(self::$itemTypeProperties[$itemType]['maxSupportWeightKg'] ?? self::$defaultMaxSupportWeightKg);
+    }
+
+    public static function getProperty(string $itemType, string $propertyKey, mixed $defaultValue = null): mixed {
+        if (self::$itemTypeProperties === null) {
+            self::loadConfig();
+        }
+        return self::$itemTypeProperties[$itemType][$propertyKey] ?? $defaultValue;
+    }
+
+    // Call to clear cache, e.g., for testing with different config files
+    public static function clearCache(): void {
+        self::$itemTypeProperties = null;
     }
 }
-
-// Initialize by loading the config - typically done in a bootstrap file or at the start of api.php
-// ItemTypeConfig::loadConfig();
-// However, to ensure it's loaded when any static method is first called,
-// the methods themselves call loadConfig() if $configData is null.
 ```

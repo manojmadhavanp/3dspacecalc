@@ -5,32 +5,27 @@ namespace App\Model;
 
 /**
  * Represents a 2D rectangular surface within a layer where items can be placed.
+ * Used by the layer-based placement strategy.
  */
 class PlacementSurface {
-    public string $id;    // Unique ID for tracking/debugging
-    public float $x;       // Starting X coordinate of this surface within the container
-    public float $y;       // Starting Y coordinate of this surface within the container
-    public float $width;   // Width of this surface (along container's X-axis)
-    public float $length;  // Length of this surface (along container's Y-axis)
-
-    /**
-     * @var float The maximum height an item placed on this surface can have,
-     *            determined by the layer's definition (e.g., container_height - layer_z_start).
-     */
+    public string $id;
+    public float $x;
+    public float $y;
+    public float $width;
+    public float $length;
     public float $availableHeightOnSurface;
-
     public float $area;
-
-    private static int $idCounter = 0; // Simple counter for unique IDs
+    private static int $idCounter = 0;
 
     public function __construct(
         float $x,
         float $y,
         float $width,
         float $length,
-        float $availableHeight
+        float $availableHeight,
+        ?string $idSuffix = null // Optional suffix for more descriptive IDs
     ) {
-        $this->id = "SFC_" . self::$idCounter++;
+        $this->id = "SFC_" . ($idSuffix ?? self::$idCounter++);
         $this->x = $x;
         $this->y = $y;
         $this->width = $width;
@@ -39,8 +34,12 @@ class PlacementSurface {
         $this->area = $this->width * $this->length;
     }
 
+    public static function resetIdCounter() {
+        self::$idCounter = 0;
+    }
+
     public function isValid(): bool {
-        $epsilon = 0.01; // Minimum sensible dimension
+        $epsilon = 0.01;
         return $this->width > $epsilon && $this->length > $epsilon && $this->availableHeightOnSurface > $epsilon;
     }
 

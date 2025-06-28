@@ -5,23 +5,17 @@ namespace App\Model;
 
 class Item {
     public string $name;
-    public string $type; // e.g., "box", "pallet"
-    public float $width;  // Original width (cm)
-    public float $length; // Original length (cm)
-    public float $height; // Original height (cm)
-    public float $weight; // Weight per unit (kg)
-    public bool $stackable; // Whether items of THIS TYPE can be stacked on each other, or if this item can support others (see ItemTypeConfig)
-    public bool $tiltable;  // Whether the item can be rotated on X or Y axes
-    public int $qty;       // Original quantity from input
+    public string $type;
+    public float $width;
+    public float $length;
+    public float $height;
+    public float $weight;
+    public bool $stackable;
+    public bool $tiltable;
+    public int $qty;
 
-    // Properties populated during processing
-    public int $originalQtyIndex = 0; // Unique index if items are expanded (1 to N)
-    public string $category = '';      // GPC, GPINGC, OOG - determined by SortItemsService
-
-    // Stores placement details if item is placed.
-    // Could be an array or a reference to a PlacedItem object, depending on final structure.
-    // For now, let's assume it will store an array like:
-    // ['x' => x, 'y' => y, 'z' => z, 'orientedWidth' => oW, 'orientedLength' => oL, 'orientedHeight' => oH]
+    public int $originalQtyIndex = 0;
+    public string $category = '';
     public ?array $placement = null;
 
     public function __construct(
@@ -44,50 +38,35 @@ class Item {
         return $this->width * $this->length * $this->height;
     }
 
-    /**
-     * Returns dimensions based on a specific orientation.
-     * Orientation index:
-     * For non-tiltable (or default for tiltable):
-     *   0: W, L, H (width as X-dim, length as Y-dim, height as Z-dim for placement)
-     *   1: L, W, H (length as X-dim, width as Y-dim, height as Z-dim for placement)
-     * For tiltable (6 orientations - L,W,H != H,W,L etc.):
-     *   0: W, L, H
-     *   1: L, W, H (Rotated Z)
-     *   2: W, H, L (Rotated X, width base, height becomes length, length becomes height)
-     *   3: H, W, L (Rotated X then Z)
-     *   4: L, H, W (Rotated Y, length base, height becomes width, width becomes height)
-     *   5: H, L, W (Rotated Y then Z)
-     * TODO: This needs robust implementation if 6-way tilting is fully supported.
-     * For now, simplified to 2 orientations for planning.
-     */
     public function getOrientedDimensions(int $orientation = 0): array {
         $w = $this->width;
         $l = $this->length;
         $h = $this->height;
 
         if ($this->tiltable) {
+            // Simplified: actual 6-way rotation logic is complex and depends on definition
+            // For now, only providing 2 basic orientations if tiltable, same as non-tiltable
             switch ($orientation) {
-                case 0: return ['width' => $w, 'length' => $l, 'height' => $h]; // Default WxLxH
-                case 1: return ['width' => $l, 'length' => $w, 'height' => $h]; // Rotated on Z (L becomes width)
-                // Placeholder for other 4 tiltable orientations - these need careful definition
-                // For example, if item is laid on its side:
-                case 2: return ['width' => $w, 'length' => $h, 'height' => $l]; // Width base, height is new length, old length is new height
-                case 3: return ['width' => $h, 'length' => $w, 'height' => $l]; // Height base, width is new length, old length is new height
-                case 4: return ['width' => $l, 'length' => $h, 'height' => $w]; // Length base, height is new width, old width is new height
-                case 5: return ['width' => $h, 'length' => $l, 'height' => $w]; // Height base, length is new width, old width is new height
+                case 0: return ['width' => $w, 'length' => $l, 'height' => $h];
+                case 1: return ['width' => $l, 'length' => $w, 'height' => $h];
+                // TODO: Add cases 2-5 for full 3D tilting if required by placement strategy
+                // case 2: return ['width' => $w, 'length' => $h, 'height' => $l]; // Example: On side
+                // case 3: return ['width' => $h, 'length' => $w, 'height' => $l]; // Example: On side rotated
+                // case 4: return ['width' => $l, 'length' => $h, 'height' => $w]; // Example: On end
+                // case 5: return ['width' => $h, 'length' => $l, 'height' => $w]; // Example: On end rotated
                 default: return ['width' => $w, 'length' => $l, 'height' => $h];
             }
-        } else { // Not tiltable, only Z-axis rotation allowed
-            if ($orientation === 1) { // Rotated 90 degrees on Z axis
+        } else {
+            if ($orientation === 1) {
                 return ['width' => $l, 'length' => $w, 'height' => $h];
             }
-            // Default: original orientation (orientation 0)
             return ['width' => $w, 'length' => $l, 'height' => $h];
         }
     }
 
     public function getNumberOfOrientations(): int {
-        return $this->tiltable ? 6 : 2; // Simplified for now, actual tiltable might just be 2 if sides not distinct
+        // TODO: Return 6 if tiltable and all 6 unique orientations are implemented in getOrientedDimensions
+        return $this->tiltable ? 2 : 2; // Simplified for now
     }
 }
 ```

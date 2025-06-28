@@ -4,24 +4,23 @@
 namespace App\Model;
 
 class Container {
-    public string $key; // e.g., "20ftGPWood"
+    public string $key;
     public string $name;
-    public float $length; // Max internal dimension (Y-axis in placement, typically longest)
-    public float $width;  // Shorter internal dimension (X-axis in placement)
-    public float $height; // Vertical internal dimension (Z-axis in placement)
+    public float $length;
+    public float $width;
+    public float $height;
     public float $doorWidth;
     public float $doorHeight;
-    public float $maxPayload; // kg
-    public float $tareWeight; // kg
-    public float $maxVolume;  // cm³ (raw internal L*W*H)
-    public float $usablePayload; // kg
-    public float $usableVolume;  // cm³
-    public array $loadingTypes; // e.g., ["front"], ["top"]
-    public string $floorType; // "Wooden", "Steel"
-    public string $category;  // "GP", "OOG"
-    public float $loadCapacityPerMeter; // tonnes/meter
+    public float $maxPayload;
+    public float $tareWeight;
+    public float $maxVolume;
+    public float $usablePayload;
+    public float $usableVolume;
+    public array $loadingTypes;
+    public string $floorType;
+    public string $category;
+    public float $loadCapacityPerMeter;
 
-    // This property will be populated by GetContainersService
     public array $assignedItems = [];
 
     public function __construct(
@@ -30,7 +29,7 @@ class Container {
         float $doorWidth, float $doorHeight,
         float $maxPayload, float $tareWeight,
         array $loadingTypes, string $floorType, string $category,
-        float $loadCapacityPerMeter, float $usableFactor = 0.95 // Make usableFactor injectable or global const
+        float $loadCapacityPerMeter, float $usableFactor = 0.95
     ) {
         $this->key = $key;
         $this->name = $name;
@@ -51,12 +50,10 @@ class Container {
         $this->usableVolume = $this->maxVolume * $usableFactor;
     }
 
-    // Helper to quickly check if it's a standard GP type often used for GPC
     public function isStandardGP(): bool {
         return $this->category === "GP" && in_array("front", $this->loadingTypes);
     }
 
-    // Helper for Open Top check
     public function isOpenTop(): bool {
         return in_array("top", $this->loadingTypes);
     }

@@ -3,36 +3,28 @@
 
 namespace App\Model;
 
-// Requires Item.php to be loaded or autoloaded
-// use App\Model\Item;
-
 class PlacedItem {
     public string $itemName;
-    public int $originalQtyIndex; // To identify this specific unit if qty > 1
+    public int $originalQtyIndex;
     public string $type;
-
-    // Store original dimensions for reference in output
-    public array $originalDimensions; // ['width' => float, 'length' => float, 'height' => float]
+    public array $originalDimensions;
     public float $weight;
 
-    // Placement details within the container
-    public float $x; // Absolute X coordinate of the front-left-bottom corner of the item
-    public float $y; // Absolute Y coordinate
-    public float $z; // Absolute Z coordinate
+    public float $x;
+    public float $y;
+    public float $z;
 
-    public float $orientedWidth;  // Actual width the item occupies in the container (along X-axis)
-    public float $orientedLength; // Actual length the item occupies in the container (along Y-axis)
-    public float $orientedHeight; // Actual height the item occupies in the container (along Z-axis)
+    public float $orientedWidth;
+    public float $orientedLength;
+    public float $orientedHeight;
 
-    // Could also store the chosen orientation index if needed for complex rendering
-    // public int $orientationIndex;
+    public ?Item $originalItemRef; // Optional: reference to original Item object, not for JSON output directly
 
     public function __construct(
-        Item $originalItem, // Pass the full Item object used for placement decision
+        Item $originalItem,
         int $originalQtyIndex,
         float $x, float $y, float $z,
         float $orientedWidth, float $orientedLength, float $orientedHeight
-        // int $orientationIndex // Potentially add this
     ) {
         $this->itemName = $originalItem->name;
         $this->originalQtyIndex = $originalQtyIndex;
@@ -50,12 +42,28 @@ class PlacedItem {
         $this->orientedWidth = $orientedWidth;
         $this->orientedLength = $orientedLength;
         $this->orientedHeight = $orientedHeight;
-        // $this->orientationIndex = $orientationIndex;
+        $this->originalItemRef = $originalItem; // Store for potential internal use (e.g. stacking checks)
     }
 
-    // Helper to get the volume this placed item occupies
     public function getPlacedVolume(): float {
         return $this->orientedWidth * $this->orientedLength * $this->orientedHeight;
+    }
+
+    // Helper to convert to array for JSON output (matches what api.php expects)
+    public function toArray(): array {
+        return [
+            "itemName" => $this->itemName,
+            "originalQtyIndex" => $this->originalQtyIndex,
+            "type" => $this->type,
+            "originalDimensions" => $this->originalDimensions,
+            "weight" => $this->weight,
+            "placement" => [
+                "x" => $this->x, "y" => $this->y, "z" => $this->z,
+                "orientedWidth" => $this->orientedWidth,
+                "orientedLength" => $this->orientedLength,
+                "orientedHeight" => $this->orientedHeight
+            ]
+        ];
     }
 }
 ```
