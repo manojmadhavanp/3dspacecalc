@@ -55,21 +55,82 @@ class CalculationController {
 
                 $responseArray = execute_load_calculation($inputData);
 
-                // --- Save to Search Table (Conceptual) ---
-                if (isset($responseArray['status']) && ($responseArray['status'] === 'SUCCESS_ALL_PLACED' || $responseArray['status'] === 'SUCCESS_PARTIAL_FIT')) {
-                   // $searchService = new \App\Service\SearchService(); // Create this service
-                   // $searchResult = $searchService->logSearch(
-                   //     $userId,
-                   //     $companyId,
-                   //     $inputData['meta_client_ccid'],
-                   //     $rawJsonData,
-                   //     json_encode($responseArray)
-                   // );
-                   // if(isset($searchResult['searchId'])) $responseArray['searchId'] = $searchResult['searchId'];
-                   // if(isset($searchResult['shareableLink'])) $responseArray['shareableLink'] = $searchResult['shareableLink'];
-                   error_log("Conceptual: Search logged for CompanyID: {$companyId}, UserID: {$userId}. Would add SearchID to response.");
+use App\Service\SearchService; // Add this for logging searches
+
+class CalculationController {
+    private ?object $authenticatedUserContext;
+    private SubscriptionService $subscriptionService;
+    private SearchService $searchService; // Add SearchService property
+
+    public function __construct(?object $authenticatedUserContext,
+                                ?SubscriptionService $subscriptionService = null,
+                                ?SearchService $searchService = null // Add to constructor
+                               ) {
+        if ($authenticatedUserContext === null || !isset($authenticatedUserContext->companyId) || !isset($authenticatedUserContext->userId)) {
+            throw new AuthException("Authentication context is missing or invalid for CalculationController.", 401);
+        }
+        $this->authenticatedUserContext = $authenticatedUserContext;
+        $this->subscriptionService = $subscriptionService ?? new SubscriptionService();
+        $this->searchService = $searchService ?? new SearchService(); // Instantiate SearchService
+    }
+
+    public function handleRequest(string $method, ?string $action, string $rawJsonData, array $filesInput): void {
+        $companyId = (int)$this->authenticatedUserContext->companyId;
+        $userId = (int)$this->authenticatedUserContext->userId;
+
+        if ($method === 'POST') {
+            if ($action === 'generatereport') {
+                $inputData = json_decode($rawJsonData, true);
+                // ... (input validation as before) ...
+                if (json_last_error() !== JSON_ERROR_NONE) { /* ... */ return; }
+                if (!isset($inputData['items']) || !is_array($inputData['items'])) { /* ... */ return; }
+
+
+                // --- Subscription Check --- (as before)
+                $calcPermission = $this->subscriptionService->canPerformCalculation($companyId);
+                if (!$calcPermission['allowed']) { /* ... throw AuthException ... */ }
+                $this->subscriptionService->recordCalculationAttempt($companyId);
+
+
+                if (!function_exists('execute_load_calculation')) {
+                     require_once __DIR__ . '/../../api_calc_engine_placeholder.php';
                 }
 
+                $inputDataForEngine = $inputData; // Keep original input for logging
+                $inputDataForEngine['meta_user_id'] = $userId;
+                $inputDataForEngine['meta_company_id'] = $companyId;
+                $inputDataForEngine['meta_client_ccid'] = isset($inputData['clientId']) && is_numeric($inputData['clientId']) ? (int)$inputData['clientId'] : null;
+
+                $responseArray = execute_load_calculation($inputDataForEngine); // This is the full calculation result
+
+                // --- Save to Search Table ---
+                if (isset($responseArray['status']) &&
+                    ($responseArray['status'] === 'SUCCESS_ALL_PLACED' || $responseArray['status'] === 'SUCCESS_PARTIAL_FIT')) {
+
+                   try {
+                       $searchLogResult = $this->searchService->logSearch(
+                           $userId,
+                           $companyId,
+                           $inputDataForEngine['meta_client_ccid'],
+                           $rawJsonData, // Original request body as SearchFormData
+                           json_encode($responseArray) // Full calculation result as SearchReturnData
+                           // ReportHTML and VisualizationData could be passed as null or derived if needed
+                       );
+
+                       if ($searchLogResult['success']) {
+                           $responseArray['searchId'] = $searchLogResult['searchId'];
+                           $responseArray['shareableLink'] = $searchLogResult['shareableLink'];
+                           // Optionally add a message: $responseArray['messages'][] = "Calculation saved with ID: " . $searchLogResult['searchId'];
+                       } else {
+                           error_log("Failed to log search for CompanyID: {$companyId}, UserID: {$userId}. Reason: " . ($searchLogResult['message'] ?? 'Unknown error'));
+                           // Non-fatal to the calculation response itself, but should be monitored.
+                           // $responseArray['messages'][] = "Warning: Calculation result could not be saved for later viewing.";
+                       }
+                   } catch (\Exception $e) {
+                        error_log("Exception while logging search for CompanyID: {$companyId}, UserID: {$userId}. Error: " . $e->getMessage());
+                        // $responseArray['messages'][] = "Warning: Error saving calculation result.";
+                   }
+                }
                 $httpStatusCode = 200;
                 if (isset($responseArray['status'])) {
                     switch ($responseArray['status']) {
