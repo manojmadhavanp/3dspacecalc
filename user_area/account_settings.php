@@ -105,31 +105,40 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Assuming API endpoint is GET /user/profile or /auth/me to get current user data
-        fetch(APP_CONFIG.baseApiUrl + '/user/profile', { // Or '/auth/me' - adjust if API is different
-            method: 'GET',
-            headers: {
-                'Authorization': 'Bearer ' + authToken,
-                'Accept': 'application/json'
-            }
-        })
+        // Use authenticatedFetch wrapper
+        authenticatedFetch(APP_CONFIG.baseApiUrl + '/user/profile', { method: 'GET' })
         .then(response => {
-            if (response.status === 401) {
-                localStorage.removeItem('authToken'); // Token is invalid or expired
-                window.dispatchEvent(new CustomEvent('authChange')); // Update header
-                throw new Error('Session expired. Please login again.');
-            }
+            // authenticatedFetch handles 401 globally.
+            // We still need to check for other non-ok statuses.
             if (!response.ok) {
                 return response.json().then(errData => {
-                    throw new Error(errData.error || errData.message || `Failed to load profile: ${response.status}`);
+                    throw new Error(errData.message || errData.error || `Failed to load profile: ${response.status}`);
                 }).catch(() => new Error(`Failed to load profile: ${response.status} ${response.statusText}`));
             }
             return response.json();
         })
-        .then(data => {
-            if (data.success && data.user) {
-                document.getElementById('profile-email').value = data.user.email || '';
-                document.getElementById('profile-firstName').value = data.user.firstName || '';
+        .then(result => { // Changed 'data' to 'result' to match standardized JSON root
+            if (result.status === 'success' && result.data && result.data.user) {
+                const user = result.data.user;
+                document.getElementById('profile-email').value = user.email || '';
+                document.getElementById('profile-firstName').value = user.firstName || '';
+                document.getElementById('profile-lastName').value = user.lastName || '';
+                document.getElementById('profile-phone').value = user.phoneNumber || user.phone || '';
+
+                localStorage.setItem('userData', JSON.stringify(user));
+                window.dispatchEvent(new CustomEvent('userDataUpdated', { detail: { user: user } }));
+
+            } else {
+                 const errorMsg = result.message || result.error || "Could not parse user profile data.";
+                 console.error("Failed to load user profile data:", errorMsg);
+                 if (profileFeedback) {
+                    profileFeedback.textContent = `Could not load profile: ${errorMsg}`;
+                    profileFeedback.className = 'message error-message';
+                    profileFeedback.style.display = 'block';
+                 }
+            }
+        })
+        .catch(error => {
                 document.getElementById('profile-lastName').value = data.user.lastName || '';
                 document.getElementById('profile-phone').value = data.user.phoneNumber || data.user.phone || ''; // API might use phoneNumber or phone
 
@@ -199,44 +208,34 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Assuming API endpoint is /user/profile or similar for the logged-in user
-        fetch(APP_CONFIG.baseApiUrl + '/user/profile', {
-            method: 'PUT', // Or POST, depending on API design
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + authToken,
-                'Accept': 'application/json'
-            },
+        // Use authenticatedFetch wrapper
+        authenticatedFetch(APP_CONFIG.baseApiUrl + '/user/profile', {
+            method: 'PUT',
             body: JSON.stringify(payload)
         })
         .then(response => {
-            if (response.status === 401) { throw new Error('Session expired. Please login again.'); }
+            // authenticatedFetch handles 401. Check other non-ok responses.
             if (!response.ok) {
                 return response.json().then(errData => {
-                    throw new Error(errData.error || errData.message || `Failed to update profile: ${response.status}`);
+                    throw new Error(errData.message || errData.error || `Failed to update profile: ${response.status}`);
                 }).catch(() => new Error(`Failed to update profile: ${response.status} ${response.statusText}`));
             }
             return response.json();
         })
-        .then(data => {
-            if (data.success) {
-                profileFeedbackDiv.textContent = data.message || 'Profile updated successfully!';
+        .then(result => { // Adhere to standardized JSON
+            if (result.status === 'success') {
+                profileFeedbackDiv.textContent = result.message || 'Profile updated successfully!';
                 profileFeedbackDiv.className = 'message success-message';
                 profileFeedbackDiv.style.display = 'block';
 
-                // Optionally, update localStorage if API returns updated user data and header needs it
-                if (data.user) { // Assuming API might return updated user object
-                    // Update stored user data if any (e.g., if first/last name is shown in header)
-                    // This part depends on how user data is managed client-side beyond just the token
+                if (result.data && result.data.user) {
                     const currentUserData = JSON.parse(localStorage.getItem('userData')) || {};
-                    const updatedUserData = { ...currentUserData, ...data.user };
+                    const updatedUserData = { ...currentUserData, ...result.data.user };
                     localStorage.setItem('userData', JSON.stringify(updatedUserData));
-                    // If header displays name from localStorage, dispatch authChange to potentially refresh it
                     window.dispatchEvent(new CustomEvent('authChange', { detail: { user: updatedUserData } }));
                 }
-
             } else {
-                throw new Error(data.error || data.message || 'Failed to update profile.');
+                throw new Error(result.message || result.error || 'Failed to update profile.');
             }
         })
         .catch(error => {
@@ -301,38 +300,30 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Assuming API endpoint is /user/password/change or similar
-        fetch(APP_CONFIG.baseApiUrl + '/user/password/change', {
+        // Use authenticatedFetch wrapper
+        authenticatedFetch(APP_CONFIG.baseApiUrl + '/user/password/change', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + authToken,
-                'Accept': 'application/json'
-            },
             body: JSON.stringify(payload)
         })
         .then(response => {
-            if (response.status === 401) { throw new Error('Session expired. Please login again.'); }
+            // authenticatedFetch handles 401. Check other non-ok responses.
             if (!response.ok) {
                 return response.json().then(errData => {
-                    throw new Error(errData.error || errData.message || `Failed to change password: ${response.status}`);
+                    throw new Error(errData.message || errData.error || `Failed to change password: ${response.status}`);
                 }).catch(() => new Error(`Failed to change password: ${response.status} ${response.statusText}`));
             }
             return response.json();
         })
-        .then(data => {
-            if (data.success) {
-                passwordFeedbackDiv.textContent = data.message || 'Password changed successfully! You might need to log in again with your new password.';
+        .then(result => { // Adhere to standardized JSON
+            if (result.status === 'success') {
+                passwordFeedbackDiv.textContent = result.message || 'Password changed successfully! You might need to log in again with your new password.';
                 passwordFeedbackDiv.className = 'message success-message';
                 passwordFeedbackDiv.style.display = 'block';
-                changePasswordForm.reset(); // Clear the form
-                // Consider forcing logout or session refresh if API doesn't handle it.
-                // localStorage.removeItem('authToken');
-                // window.dispatchEvent(new CustomEvent('authChange'));
-                // alert("Password changed. Please log in again.");
-                // window.location.href = APP_CONFIG.baseUrl + '/login';
+                changePasswordForm.reset();
+                // Consider forcing logout for security after password change
+                // handleLogout(); // If handleLogout is globally available from header.php
             } else {
-                throw new Error(data.error || data.message || 'Failed to change password.');
+                throw new Error(result.message || result.error || 'Failed to change password.');
             }
         })
         .catch(error => {

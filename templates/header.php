@@ -127,6 +127,53 @@ if (session_status() == PHP_SESSION_NONE) {
             // Listen for custom event that might be dispatched after login/token set elsewhere
             window.addEventListener('authChange', checkLoginState);
         });
+
+        /**
+         * Global fetch wrapper to automatically include Authorization header and handle 401s.
+         * @param {string} apiUrl - The full URL to the API endpoint.
+         * @param {object} options - Standard fetch options object.
+         * @returns {Promise<Response>} - The fetch Response object.
+         */
+        async function authenticatedFetch(apiUrl, options = {}) {
+            const token = localStorage.getItem('authToken');
+
+            const defaultHeaders = {
+                'Accept': 'application/json',
+            };
+
+            // Add Content-Type if there's a body and it's not already set
+            if (options.body && typeof options.body === 'string' && (!options.headers || !options.headers['Content-Type'])) {
+                defaultHeaders['Content-Type'] = 'application/json';
+            }
+
+            options.headers = {
+                ...defaultHeaders,
+                ...(options.headers || {}), // Spread any headers from options
+            };
+
+            if (token) {
+                options.headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            try {
+                const response = await fetch(apiUrl, options);
+
+                if (response.status === 401) {
+                    console.warn('401 Unauthorized encountered by authenticatedFetch. Logging out.');
+                    localStorage.removeItem('authToken');
+                    window.dispatchEvent(new CustomEvent('authChange')); // Update header UI
+                    // Redirect to login, possibly with a message
+                    window.location.href = `${APP_CONFIG.baseUrl}/login?session_expired=true&return_to=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+                    // Throw an error to stop further processing in the original promise chain
+                    throw new Error('Session expired or invalid. Please login again.');
+                }
+                return response; // Return the response for the caller to handle further
+            } catch (error) {
+                // Handle network errors or errors from the 401 throw
+                console.error('Error in authenticatedFetch:', error);
+                throw error; // Re-throw to be caught by the caller's .catch()
+            }
+        }
     </script>
     <header>
         <h1>FreightCalc Solutions</h1>

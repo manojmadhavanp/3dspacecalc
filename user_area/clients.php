@@ -187,48 +187,41 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        fetch(APP_CONFIG.baseApiUrl + '/clients', {
-            method: 'GET',
-            headers: {
-                'Authorization': 'Bearer ' + authToken,
-                'Accept': 'application/json'
-            }
-        })
+        // Use authenticatedFetch wrapper
+        authenticatedFetch(APP_CONFIG.baseApiUrl + '/clients', { method: 'GET' })
         .then(response => {
-            if (response.status === 401) { // Unauthorized
-                localStorage.removeItem('authToken');
-                window.dispatchEvent(new CustomEvent('authChange'));
-                throw new Error('Session expired or invalid. Please login again.');
-            }
+            // authenticatedFetch handles 401. Check other non-ok responses.
             if (!response.ok) {
                 return response.json().then(errData => {
-                    throw new Error(errData.error || errData.message || `Failed to load clients: ${response.status}`);
+                    throw new Error(errData.message || errData.error || `Failed to load clients: ${response.status}`);
                 }).catch(() => new Error(`Failed to load clients: ${response.status} ${response.statusText}`));
             }
             return response.json();
         })
-        .then(data => {
+        .then(result => { // Adhere to standardized JSON
             clientsTableBody.innerHTML = ''; // Clear loading message
-            if (data.success && Array.isArray(data.clients)) {
-                if (data.clients.length === 0) {
+            if (result.status === 'success' && result.data && Array.isArray(result.data.clients)) {
+                const clients = result.data.clients;
+                if (clients.length === 0) {
                     clientsTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No clients found. Add your first client!</td></tr>';
                 } else {
-                    data.clients.forEach(client => {
+                    clients.forEach(client => {
                         const row = clientsTableBody.insertRow();
-                        row.insertCell().textContent = client.ccid || client.id || 'N/A'; // Assuming API returns ccid or id
-                        row.insertCell().textContent = client.companyName || 'N/A';
+                        // Assuming API returns concise keys like 'id' for ccid, 'name' for companyName from standard
+                        row.insertCell().textContent = client.id || client.ccid || 'N/A';
+                        row.insertCell().textContent = client.name || client.companyName || 'N/A';
                         row.insertCell().textContent = client.email || 'N/A';
-                        row.insertCell().textContent = client.contactCount || 0; // Assuming API returns contactCount
+                        row.insertCell().textContent = client.contactsCount || client.contactCount || 0; // API might use contactsCount
 
                         const actionsCell = row.insertCell();
                         actionsCell.innerHTML = `
-                            <button class="action-btn edit-btn" data-client-id="${client.ccid || client.id}">Edit/Contacts</button>
-                            <button class="action-btn delete-btn" data-client-id="${client.ccid || client.id}">Delete</button>
+                            <button class="action-btn edit-btn" data-client-id="${client.id || client.ccid}">Edit/Contacts</button>
+                            <button class="action-btn delete-btn" data-client-id="${client.id || client.ccid}">Delete</button>
                         `;
                     });
                 }
             } else {
-                throw new Error(data.error || data.message || 'Invalid data received for clients.');
+                throw new Error(result.message || result.error || 'Invalid data received for clients.');
             }
         })
         .catch(error => {
