@@ -289,11 +289,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Basic Client-side validation
         if (!clientName) {
-            alert('Client Company Name is required.'); // Simple alert for now
+            displayFeedback('Client Company Name is required.', 'error');
+            document.getElementById('client-form-clientName').focus();
             return;
         }
         if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
-            alert('Invalid email format for client.');
+            displayFeedback('Invalid email format for client.', 'error');
+            document.getElementById('client-form-clientEmail').focus();
             return;
         }
 
@@ -335,20 +337,30 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             return response.json();
         })
-        .then(data => {
-            if (data.success) {
-                displayFeedback(data.message || `Client ${isEditMode ? 'updated' : 'added'} successfully!`, 'success');
+        .then(result => { // Expecting standardized JSON
+            if (result.status === 'success') {
+                const clientNameFromForm = document.getElementById('client-form-clientName').value.trim();
+                const successMsg = result.message || `Client "${clientNameFromForm}" ${isEditMode ? 'updated' : 'added'} successfully!`;
+                displayFeedback(successMsg, 'success');
                 closeClientModal();
                 fetchClients(); // Refresh the client list
             } else {
-                throw new Error(data.error || data.message || `Failed to ${isEditMode ? 'update' : 'add'} client.`);
+                // Handle structured errors if provided by API
+                let errorMessage = result.message || result.error || `Failed to ${isEditMode ? 'update' : 'add'} client.`;
+                if (result.errors) {
+                    const fieldErrors = Object.entries(result.errors).map(([field, messages]) => {
+                        // Capitalize field name for display
+                        const capField = field.charAt(0).toUpperCase() + field.slice(1);
+                        return `${capField}: ${messages.join(', ')}`;
+                    }).join('; ');
+                    errorMessage += ` Details: ${fieldErrors}`;
+                }
+                throw new Error(errorMessage);
             }
         })
         .catch(error => {
             console.error(`Error ${isEditMode ? 'updating' : 'adding'} client:`, error);
-            // Display error inside the modal or as a general feedback message
-            alert(`Error: ${error.message}`); // Simple alert for now, can integrate with modal's own error display
-            displayFeedback(`Error: ${error.message}`, 'error');
+            displayFeedback(`Error: ${error.message}`, 'error'); // Use displayFeedback instead of alert
         })
         .finally(() => {
             saveClientBtn.textContent = originalButtonText;
@@ -524,16 +536,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const contactPhone = document.getElementById('contact-form-phone').value.trim();
 
         if (!clientCcid) {
-            alert('Error: Client ID is missing for adding contact.');
+            displayFeedback('Error: Client ID is missing for contact operation.', 'error'); // Use displayFeedback
             return;
         }
         if (!contactName) {
-            alert('Contact Name is required.');
+            displayFeedback('Contact Name is required.', 'error'); // Use displayFeedback
             document.getElementById('contact-form-name').focus();
             return;
         }
         if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
-            alert('Invalid email format for contact.');
+            displayFeedback('Invalid email format for contact.', 'error'); // Use displayFeedback
             document.getElementById('contact-form-email').focus();
             return;
         }
