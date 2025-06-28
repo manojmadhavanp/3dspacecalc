@@ -119,6 +119,8 @@ if (!$report_id_from_url || !$token_from_url) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($pageTitle) . (isset($search_id) ? " - ID: " . htmlspecialchars($search_id) : ""); ?> - <?php echo APP_NAME; ?></title>
     <link rel="stylesheet" href="css/style.css"> <!-- Assuming a global style.css -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         body { background-color: #f4f8fc; }
         .report-container {
@@ -319,10 +321,13 @@ if (!$report_id_from_url || !$token_from_url) {
                          document.getElementById('report-2d-layers-view').innerHTML = "<p><em>No container data found in visualization for 2D view.</em></p>";
                     }
 
-                    // Placeholder for 3D initialization call
-                    // if (typeof init3DViewer === 'function') {
-                    //    init3DViewer('report-3d-view-placeholder', vizData);
-                    // }
+                    // Call to initialize 3D viewer
+                    if (typeof init3DViewer === 'function') {
+                       init3DViewer('report-3d-view-placeholder', vizData);
+                    } else {
+                        console.error("init3DViewer function is not defined.");
+                        document.getElementById('report-3d-view-placeholder').innerHTML = "<p><em>Error: 3D viewer function not available.</em></p>";
+                    }
 
                 } catch (e) {
                     console.error("Error processing visualization data for 2D/3D views:", e);
@@ -331,14 +336,182 @@ if (!$report_id_from_url || !$token_from_url) {
             });
             <?php endif; ?>
 
-            // Placeholder for init3DViewer function if it were to be defined here
-            /*
-            function init3DViewer(containerId, vizData) {
-                const placeholderDiv = document.getElementById(containerId);
-                placeholderDiv.innerHTML = `<p><strong>3D Viewer Initialized (Simulated)</strong></p><pre>${JSON.stringify(vizData, null, 2)}</pre>`;
-                // Actual Three.js/BabylonJS code would go here
+            function init3DViewer(containerDivId, vizData) {
+                const placeholderDiv = document.getElementById(containerDivId);
+                if (!placeholderDiv) {
+                    console.error("3D Viewer container DIV not found:", containerDivId);
+                    return;
+                }
+                // Clear any existing content (like the "3D model rendering will appear here" text)
+                placeholderDiv.innerHTML = '';
+
+                let scene, camera, renderer, controls;
+
+                // Scene
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0xf0f0f0); // Light grey background
+
+                // Camera
+                const aspectRatio = placeholderDiv.clientWidth / (placeholderDiv.clientHeight || 500); // Use clientHeight or a default
+                camera = new THREE.PerspectiveCamera(75, aspectRatio, 0.1, 10000); // fov, aspect, near, far
+                camera.position.set(300, 300, 500); // Initial camera position (example values in cm)
+                camera.lookAt(0, 0, 0);
+
+                // Renderer
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(placeholderDiv.clientWidth, placeholderDiv.clientHeight || 500);
+                placeholderDiv.appendChild(renderer.domElement);
+
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Soft white light
+                scene.add(ambientLight);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(200, 500, 300); // Position light
+                scene.add(directionalLight);
+                // const dLightHelper = new THREE.DirectionalLightHelper(directionalLight, 50);
+                // scene.add(dLightHelper);
+
+
+                // Controls
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true; // an animation loop is required when either damping or auto-rotation are enabled
+                controls.dampingFactor = 0.05;
+                controls.screenSpacePanning = false;
+                controls.minDistance = 50;
+                controls.maxDistance = 2000;
+                // controls.maxPolarAngle = Math.PI / 2; // Prevent camera from going below ground
+
+                // Handle window resize
+                function onWindowResize() {
+                    if (placeholderDiv.clientWidth > 0 && (placeholderDiv.clientHeight || 500) > 0) {
+                         camera.aspect = placeholderDiv.clientWidth / (placeholderDiv.clientHeight || 500);
+                         camera.updateProjectionMatrix();
+                         renderer.setSize(placeholderDiv.clientWidth, placeholderDiv.clientHeight || 500);
+                    }
+                }
+                window.addEventListener('resize', onWindowResize, false);
+                // Consider also ResizeObserver for the placeholderDiv itself if its size can change independent of window
+
+                // Animation Loop
+                function animate() {
+                    requestAnimationFrame(animate);
+                    controls.update(); // only required if controls.enableDamping or controls.autoRotate are set to true
+                    renderer.render(scene, camera);
+                }
+                animate();
+
+                // Store for potential later access if needed, e.g., for adding objects dynamically
+                placeholderDiv.userData = { scene, camera, renderer, controls, vizData };
+
+                console.log("3D Viewer Initialized for container:", containerDivId, "with data:", vizData);
+
+                // --- Render Container Geometry ---
+                if (vizData && vizData.containers && vizData.containers.length > 0) {
+                    const firstContainerData = vizData.containers[0];
+                    const cDims = firstContainerData.containerDimensions;
+
+                    if (cDims && cDims.length && cDims.width && cDims.height) {
+                        // Assuming dimensions are in cm. Three.js units can be whatever you decide (e.g., 1 unit = 1 cm)
+                        const containerGeom = new THREE.BoxGeometry(cDims.length, cDims.height, cDims.width); // L, H, W -> X, Y, Z
+
+                        // Make container semi-transparent or wireframe to see inside
+                        const containerMat = new THREE.MeshPhongMaterial({
+                            color: 0xcccccc,
+                            opacity: 0.2,
+                            transparent: true,
+                            side: THREE.DoubleSide // Render both sides to see inside if camera goes in
+                        });
+                        // Or wireframe:
+                        // const containerMat = new THREE.MeshBasicMaterial({ color: 0xaaaaaa, wireframe: true });
+
+                        const containerMesh = new THREE.Mesh(containerGeom, containerMat);
+
+                        // Position the container so its base's center is at world origin (0,0,0) initially
+                        // This means its bottom-front-left corner would be at (-L/2, 0, -W/2) if Y is up
+                        containerMesh.position.set(0, cDims.height / 2, 0);
+                        // If placement data for items is relative to a corner (e.g. 0,0,0 of container),
+                        // then the container itself might be positioned so that corner is at world origin.
+                        // For now, centering the container at origin and placing items relative to this center.
+                        // Let's adjust camera to better view this centered container:
+                        camera.lookAt(containerMesh.position); // Look at center of container base
+
+                        scene.add(containerMesh);
+
+                        // Add a simple grid helper on the XZ plane (floor)
+                        const gridSize = Math.max(cDims.length, cDims.width) * 1.2;
+                        const gridDivisions = 20;
+                        const gridHelper = new THREE.GridHelper(gridSize, gridDivisions);
+                        // gridHelper.position.y = 0; // Position it at the base of the container
+                        scene.add(gridHelper);
+
+                    } else {
+                        console.warn("Container dimensions missing in vizData for 3D rendering.");
+                    }
+                } else {
+                    console.warn("No container data in vizData for 3D rendering.");
+                }
+
+                // --- Render Placed Items Geometry ---
+                if (vizData && vizData.containers && vizData.containers.length > 0 &&
+                    vizData.containers[0].placedItems && vizData.containers[0].placedItems.length > 0) {
+
+                    const placedItems = vizData.containers[0].placedItems;
+                    const containerDims = vizData.containers[0].containerDimensions; // For calculating offset
+
+                    // Define the container's origin in world space (center of its base is at 0,0,0)
+                    // So, the front-left-bottom corner of the container's *internal* space is:
+                    const containerOriginX = - (containerDims.length / 2);
+                    const containerOriginY = 0; // Base of container is at y=0
+                    const containerOriginZ = - (containerDims.width / 2); // Assuming positive Z goes "into" the screen initially if width is depth
+
+                    placedItems.forEach(item => {
+                        const od = item.placement?.orientedDimensions || item.originalDimensions;
+                        const p = item.placement;
+
+                        if (od && od.length && od.height && od.width && p &&
+                            typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number') {
+
+                            const itemGeom = new THREE.BoxGeometry(od.length, od.height, od.width); // L, H, W -> X, Y, Z
+                            const itemMat = new THREE.MeshStandardMaterial({
+                                color: item.color ? new THREE.Color(item.color) : new THREE.Color(0x00ff00), // Use item's color or default green
+                                metalness: 0.3,
+                                roughness: 0.6
+                            });
+                            const itemMesh = new THREE.Mesh(itemGeom, itemMat);
+
+                            // Item placement (p.x, p.y, p.z) is relative to container's internal origin (front-left-bottom corner).
+                            // We need to position the center of the itemMesh.
+                            // If p.x, p.y, p.z is the front-left-bottom of the item:
+                            itemMesh.position.set(
+                                containerOriginX + p.x + (od.length / 2),
+                                containerOriginY + p.z + (od.height / 2), // Map item's Z (height stacking) to world Y
+                                containerOriginZ + p.y + (od.width / 2)   // Map item's Y (depth in container) to world Z
+                            );
+                            // Self-correction: The 2D canvas mapping used item.placement.y for container's width axis.
+                            // The 3D data structure has item.placement.x, item.placement.y, item.placement.z.
+                            // Let's assume standard 3D orientation:
+                            // item.placement.x = position along container length (World X)
+                            // item.placement.y = position along container width (World Z)
+                            // item.placement.z = position along container height (World Y)
+                            // Container: Length (X), Height (Y), Width (Z)
+
+                            // Recalculate position based on this standard assumption:
+                             itemMesh.position.set(
+                                containerOriginX + p.x + (od.length / 2), // Item's X pos + half its length
+                                containerOriginY + p.z + (od.height / 2), // Item's Z (height) pos + half its height
+                                containerOriginZ + p.y + (od.width / 2)   // Item's Y pos + half its width
+                            );
+                            // The item's dimensions are: od.length (X), od.height (Y), od.width (Z)
+
+                            scene.add(itemMesh);
+                        } else {
+                            console.warn("Placed item missing dimensions or placement data:", item);
+                        }
+                    });
+                } else {
+                     console.warn("No placed items in vizData for 3D rendering or container data missing.");
+                }
             }
-            */
         </script>
 
         <div class="report-footer">
