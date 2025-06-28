@@ -19,7 +19,16 @@ class AuthService {
 
     public function __construct(?PDO $dbConnection = null) {
         $this->db = $dbConnection ?? (new Database())->getConnection();
-        $this->jwtSecretKey = getenv('JWT_SECRET_KEY') ?: 'fallback_secret_6789012345_abcde_1234567890_xyz_0987654321_top_secret';
+
+        $this->jwtSecretKey = getenv('JWT_SECRET_KEY');
+        // Critical: JWT_SECRET_KEY must be set in the environment and be strong.
+        // The check for empty/short key is now primarily in routes.php or index.php before this service is used.
+        if (empty($this->jwtSecretKey)) {
+             error_log("CRITICAL: JWT_SECRET_KEY environment variable is not set. Authentication will fail.");
+             // Depending on application policy, might throw a fatal error here.
+             // For now, AuthService will proceed, but JWT operations will likely fail if key is truly empty.
+        }
+
         $this->jwtIssuer = getenv('JWT_ISSUER') ?: 'xactload.hostboxindia.com';
         $this->jwtExpirationSeconds = (int)(getenv('JWT_EXPIRATION_SECONDS') ?: 3600);
     }
@@ -70,13 +79,15 @@ class AuthService {
             $stmtAuth = $this->db->prepare($sqlAuth);
             $stmtAuth->execute([':uid' => $userId, ':passwordEncrypted' => $hashedPassword]);
 
-            $trialEndDate = date('Y-m-d H:i:s', strtotime('+'. (getenv('TRIAL_DURATION_DAYS') ?: 30) .' days'));
-            $trialMaxUsers = getenv('TRIAL_MAX_USERS') ?: 1; $trialMaxCalcs = getenv('TRIAL_MAX_CALCS_PER_DAY') ?: 5;
+            $trialDurationDays = (int)(getenv('TRIAL_DURATION_DAYS') ?: 30); // Ensure cast to int
+            $trialEndDate = date('Y-m-d H:i:s', strtotime("+$trialDurationDays days"));
+            $trialMaxUsers = (int)(getenv('TRIAL_MAX_USERS') ?: 1); // Ensure cast to int
+            $trialMaxCalcs = (int)(getenv('TRIAL_MAX_CALCS_PER_DAY') ?: 5); // Ensure cast to int
             $sqlSubscription = "INSERT INTO company_subscription
                                 (CompanyID, PackageName, MaxUsers, MaxCalculationsPerDay, SubscriptionEndDate, PaymentStatus)
                                 VALUES (:companyId, 'trial', :maxUsers, :maxCalcs, :endDate, 'active')";
             $stmtSubscription = $this->db->prepare($sqlSubscription);
-            $stmtSubscription->execute([':companyId' => $companyId, ':maxUsers' => (int)$trialMaxUsers, ':maxCalcs' => (int)$trialMaxCalcs, ':endDate' => $trialEndDate]);
+            $stmtSubscription->execute([':companyId' => $companyId, ':maxUsers' => $trialMaxUsers, ':maxCalcs' => $trialMaxCalcs, ':endDate' => $trialEndDate]);
 
             $this->db->commit();
             return ['success' => true, 'message' => 'Company and user registered successfully.',
