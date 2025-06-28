@@ -113,16 +113,21 @@ if (!$report_id_from_url || !$token_from_url) {
 }
 ?>
 <!DOCTYPE html>
-<html lang="en">
-<head>
+<?php
+// config.php is included by header_website.php which provides BASE_URL and APP_CONFIG for JS.
+// $pageTitle is set before including header.
+require_once 'templates/header_website.php'; // Use website header
+?>
+<?php /* view_report.php might not need login-page-body styling, uses its own .report-container */ ?>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($pageTitle) . (isset($search_id) ? " - ID: " . htmlspecialchars($search_id) : ""); ?> - <?php echo APP_NAME; ?></title>
-    <link rel="stylesheet" href="css/style.css"> <!-- Assuming a global style.css -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <?php /* Title is set in header_website.php based on $pageTitle */ ?>
+    <?php /* CSS /css/style.css is included in header_website.php */ ?>
+    <?php /* Three.js scripts are included in header_website.php */ ?>
     <style>
-        body { background-color: #f4f8fc; }
+        /* body class for view_report if needed, or specific styles for .report-container */
+        /* body { background-color: #f4f8fc; } // This can be a global body style or page specific */
         .report-container {
             max-width: 900px;
             margin: 20px auto;
@@ -512,10 +517,7 @@ if (!$report_id_from_url || !$token_from_url) {
                 }
             }
         </script>
-
-        <div class="report-footer">
-            <p>&copy; <?php echo date("Y"); ?> <?php echo APP_NAME; ?>. All rights reserved.</p>
-        </div>
+        {/* Footer content (copyright) is now part of footer_website.php */}
     </div>
-</body>
-</html>
+
+<?php require_once 'templates/footer_website.php'; // Use website footer ?>

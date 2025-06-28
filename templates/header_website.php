@@ -79,120 +79,113 @@ if (session_status() == PHP_SESSION_NONE) {
     </style>
 </head>
 <body>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo isset($pageTitle) ? htmlspecialchars($pageTitle) : "SaaS Platform"; ?> - XACTLOAD</title>
+    <?php
+        // This path assumes router_index.php is at the root and css folder is also at the root.
+        echo '<link rel="stylesheet" href="/css/style.css">';
+    ?>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Removed inline styles from here, should be in style.css -->
+</head>
+<body>
     <script>
         // Make config available to JavaScript
         window.APP_CONFIG = {
-            // BASE_URL is for frontend routing and constructing absolute paths for non-API assets if needed
-            baseUrl: '<?php echo rtrim(BASE_URL, '/'); ?>', // Remove trailing slash for easy joining
-            // BASE_API_URL is specifically for backend API calls
-            baseApiUrl: '<?php echo rtrim(BASE_API_URL, '/'); ?>' // Remove trailing slash for easy joining
+            baseUrl: '<?php echo rtrim(BASE_URL, '/'); ?>',
+            baseApiUrl: '<?php echo rtrim(BASE_API_URL, '/'); ?>'
         };
-        // Now JS can use APP_CONFIG.baseUrl + '/some/path' or APP_CONFIG.baseApiUrl + '/endpoint'
 
         function checkLoginState() {
-            const token = localStorage.getItem('authToken'); // Or sessionStorage
-            const loggedOutItems = document.querySelectorAll('.nav-item-logged-out');
-            const loggedInItems = document.querySelectorAll('.nav-item-logged-in');
+            const token = localStorage.getItem('authToken');
+            // Target elements specific to header_website
+            const loggedOutItems = document.querySelectorAll('.website-nav-logged-out');
+            const loggedInItems = document.querySelectorAll('.website-nav-logged-in');
 
             if (token) {
                 loggedOutItems.forEach(item => item.style.display = 'none');
-                loggedInItems.forEach(item => item.style.display = 'inline'); // Or 'list-item' or ''
+                loggedInItems.forEach(item => item.style.display = 'list-item'); // Or 'inline-block' depending on CSS
             } else {
-                loggedOutItems.forEach(item => item.style.display = 'inline');
+                loggedOutItems.forEach(item => item.style.display = 'list-item');
                 loggedInItems.forEach(item => item.style.display = 'none');
             }
         }
 
         function handleLogout() {
-            localStorage.removeItem('authToken'); // Or sessionStorage
-            // Optionally: Call a backend API to invalidate session/token server-side
-            // fetch(APP_CONFIG.baseApiUrl + '/auth/logout', { method: 'POST', headers: {'Authorization': 'Bearer ' + token_before_delete }})
-            //  .then(...)
-            //  .catch(...);
-            checkLoginState(); // Update nav immediately
-            window.location.href = APP_CONFIG.baseUrl + '/login'; // Redirect to login
+            localStorage.removeItem('authToken');
+            // Optional: Call backend logout API via authenticatedFetch if needed
+            // authenticatedFetch(APP_CONFIG.baseApiUrl + '/auth/logout', { method: 'POST' })
+            // .finally(() => { // Ensure redirection happens even if API call fails for some reason
+            //     checkLoginState();
+            //     window.location.href = APP_CONFIG.baseUrl + '/login';
+            // });
+            checkLoginState();
+            window.location.href = APP_CONFIG.baseUrl + '/login';
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            checkLoginState(); // Check login state on page load
+            checkLoginState();
 
-            const logoutLink = document.getElementById('logout-link');
+            const logoutLink = document.getElementById('website-logout-link');
             if (logoutLink) {
                 logoutLink.addEventListener('click', function(event) {
                     event.preventDefault();
                     handleLogout();
                 });
             }
-
-            // Listen for custom event that might be dispatched after login/token set elsewhere
             window.addEventListener('authChange', checkLoginState);
         });
 
-        /**
-         * Global fetch wrapper to automatically include Authorization header and handle 401s.
-         * @param {string} apiUrl - The full URL to the API endpoint.
-         * @param {object} options - Standard fetch options object.
-         * @returns {Promise<Response>} - The fetch Response object.
-         */
         async function authenticatedFetch(apiUrl, options = {}) {
             const token = localStorage.getItem('authToken');
-
-            const defaultHeaders = {
-                'Accept': 'application/json',
-            };
-
-            // Add Content-Type if there's a body and it's not already set
+            const defaultHeaders = { 'Accept': 'application/json' };
             if (options.body && typeof options.body === 'string' && (!options.headers || !options.headers['Content-Type'])) {
                 defaultHeaders['Content-Type'] = 'application/json';
             }
-
-            options.headers = {
-                ...defaultHeaders,
-                ...(options.headers || {}), // Spread any headers from options
-            };
-
+            options.headers = { ...defaultHeaders, ...(options.headers || {}) };
             if (token) {
                 options.headers['Authorization'] = `Bearer ${token}`;
             }
-
             try {
                 const response = await fetch(apiUrl, options);
-
                 if (response.status === 401) {
-                    console.warn('401 Unauthorized encountered by authenticatedFetch. Logging out.');
+                    console.warn('401 Unauthorized by authenticatedFetch. Logging out.');
                     localStorage.removeItem('authToken');
-                    window.dispatchEvent(new CustomEvent('authChange')); // Update header UI
-                    // Redirect to login, possibly with a message
+                    window.dispatchEvent(new CustomEvent('authChange'));
                     window.location.href = `${APP_CONFIG.baseUrl}/login?session_expired=true&return_to=${encodeURIComponent(window.location.pathname + window.location.search)}`;
-                    // Throw an error to stop further processing in the original promise chain
                     throw new Error('Session expired or invalid. Please login again.');
                 }
-                return response; // Return the response for the caller to handle further
+                return response;
             } catch (error) {
-                // Handle network errors or errors from the 401 throw
                 console.error('Error in authenticatedFetch:', error);
-                throw error; // Re-throw to be caught by the caller's .catch()
+                throw error;
             }
         }
     </script>
-    <header>
-        <h1>FreightCalc Solutions</h1>
-        <nav>
-            <ul>
-                <!-- These links will now be handled by the frontend router (router_index.php) -->
-                <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/">Home</a></li>
-                <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/about">About Us</a></li>
-                <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/features">Features</a></li>
-                <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/pricing">Pricing</a></li>
-                <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/contact">Contact Us</a></li>
-
-                <!-- Auth links will be dynamically shown/hidden by JavaScript based on token presence -->
-                <li class="nav-item-logged-out" style="display: none;"><a href="<?php echo rtrim(BASE_URL, '/'); ?>/login">Login</a></li>
-                <li class="nav-item-logged-out" style="display: none;"><a href="<?php echo rtrim(BASE_URL, '/'); ?>/register">Register</a></li>
-
-                <li class="nav-item-logged-in" style="display: none;"><a href="<?php echo rtrim(BASE_URL, '/'); ?>/user/dashboard">Dashboard</a></li>
-                <li class="nav-item-logged-in" style="display: none;"><a href="#" id="logout-link">Logout</a></li>
-            </ul>
-        </nav>
+    <header class="site-header-website">
+        <div class="header-website-content">
+            <div class="logo-container-website">
+                <a href="<?php echo rtrim(BASE_URL, '/'); ?>/">
+                    <h1>XACTLOAD</h1>
+                </a>
+            </div>
+            <nav class="main-navigation-website">
+                <button id="mobile-nav-toggle" aria-label="Toggle navigation" aria-expanded="false">&#9776;</button>
+                <ul id="website-nav-ul">
+                    <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/">Home</a></li>
+                    <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/about">About</a></li>
+                    <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/features">Features</a></li>
+                    <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/pricing">Pricing</a></li>
+                    <li><a href="<?php echo rtrim(BASE_URL, '/'); ?>/contact">Contact Us</a></li>
+                    <li class="website-nav-logged-out" style="display: none;"><a href="<?php echo rtrim(BASE_URL, '/'); ?>/login" class="nav-button">Sign In</a></li>
+                    <li class="website-nav-logged-in" style="display: none;"><a href="<?php echo rtrim(BASE_URL, '/'); ?>/user/dashboard" class="nav-button">Dashboard</a></li>
+                    <li class="website-nav-logged-in" style="display: none;"><a href="#" id="website-logout-link" class="nav-button">Sign Out</a></li>
+                </ul>
+            </nav>
+        </div>
     </header>
-    <div class="container">
+    <div class="container"> {/* This container is for the main page content below the header */}

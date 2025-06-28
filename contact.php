@@ -1,78 +1,127 @@
 <?php
 $pageTitle = "Contact Us";
-require_once 'templates/header.php';
+require_once 'templates/header_website.php';
 
-$form_submitted = false;
-$submit_error = '';
-$submit_success = '';
-
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Basic validation and sanitation
-    $name = filter_input(INPUT_POST, 'name', FILTER_SANITIZE_STRING);
-    $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
-    $subject_form = filter_input(INPUT_POST, 'subject', FILTER_SANITIZE_STRING);
-    $message = filter_input(INPUT_POST, 'message', FILTER_SANITIZE_STRING);
-
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $submit_error = "Please enter a valid email address.";
-    } elseif (empty($name) || empty($subject_form) || empty($message)) {
-        $submit_error = "Please fill in all required fields.";
-    } else {
-        // Simulate sending email
-        // In a real app, you would use PHPMailer or a similar library
-        // mail("your-support-email@example.com", "Contact Form: " . $subject_form, $message, "From: " . $email);
-        $submit_success = "Thank you for contacting us, " . htmlspecialchars($name) . "! We will get back to you shortly.";
-        $form_submitted = true;
-    }
-}
-
-// Pre-fill subject if passed via GET parameter (e.g., from pricing page)
+// All PHP form processing logic removed. This will be handled by client-side JavaScript.
 $prefill_subject = isset($_GET['subject']) ? htmlspecialchars($_GET['subject']) : '';
-
 ?>
 
 <h2 class="page-title">Contact Us</h2>
 <p class="text-center">Have questions or need support? Fill out the form below, and our team will get back to you as soon as possible.</p>
 
-<?php if ($submit_error): ?>
-    <p class="message error-message"><?php echo $submit_error; ?></p>
-<?php endif; ?>
+<div id="contact-feedback-message" class="message" style="display:none;"></div>
 
-<?php if ($submit_success): ?>
-    <p class="message success-message"><?php echo $submit_success; ?></p>
-<?php endif; ?>
-
-<?php if (!$form_submitted || $submit_error): // Show form if not submitted successfully or if there was an error ?>
-<form action="contact.php" method="POST" style="max-width: 600px; margin: 20px auto; padding:20px; background:#f9f9f9; border-radius:5px;">
+<form id="contact-us-form" style="max-width: 600px; margin: 20px auto; padding:20px; background:#f9f9f9; border-radius:5px;">
     <div>
-        <label for="name">Full Name:</label>
-        <input type="text" id="name" name="name" value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>" required>
+        <label for="contact-name">Full Name:</label>
+        <input type="text" id="contact-name" name="name" required>
     </div>
     <div>
-        <label for="email">Email Address:</label>
-        <input type="email" id="email" name="email" value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>" required>
+        <label for="contact-email">Email Address:</label>
+        <input type="email" id="contact-email" name="email" required>
     </div>
     <div>
-        <label for="subject">Subject:</label>
-        <input type="text" id="subject" name="subject" value="<?php echo isset($_POST['subject']) ? htmlspecialchars($_POST['subject']) : $prefill_subject; ?>" required>
+        <label for="contact-subject">Subject:</label>
+        <input type="text" id="contact-subject" name="subject" value="<?php echo $prefill_subject; ?>" required>
     </div>
     <div>
-        <label for="message">Message:</label>
-        <textarea id="message" name="message" rows="6" required><?php echo isset($_POST['message']) ? htmlspecialchars($_POST['message']) : ''; ?></textarea>
+        <label for="contact-message">Message:</label>
+        <textarea id="contact-message" name="message" rows="6" required></textarea>
     </div>
     <div>
-        <input type="submit" value="Send Message">
+        <button type="submit" id="contact-submit-btn">Send Message</button>
     </div>
 </form>
-<?php endif; ?>
 
 <div style="text-align: center; margin-top: 30px;">
     <h3>Other Ways to Reach Us:</h3>
-    <p><strong>Email:</strong> support@freightcalc.example.com</p>
-    <p><strong>Phone:</strong> +91-123-456-7890 (Mon-Fri, 9 AM - 6 PM IST)</p>
-    <p><strong>Address:</strong> 123 Logistics Lane, Tech Park, Bangalore, India</p>
-    <p>(Please note: Email and Phone are placeholders)</p>
+    <p><strong>Email:</strong> support@xactload.com (Example)</p>
+    <p><strong>Phone:</strong> +91-123-456-7890 (Mon-Fri, 9 AM - 6 PM IST) (Example)</p>
+    <p><strong>Address:</strong> 123 Logistics Lane, Tech Park, Bangalore, India (Example)</p>
 </div>
 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof APP_CONFIG === 'undefined' || !APP_CONFIG.baseApiUrl) {
+        console.error('APP_CONFIG (baseApiUrl) is not defined for contact form.');
+        const feedbackDiv = document.getElementById('contact-feedback-message');
+        if(feedbackDiv) {
+            feedbackDiv.textContent = 'Application configuration error. Cannot send message.';
+            feedbackDiv.className = 'message error-message';
+            feedbackDiv.style.display = 'block';
+        }
+        // Potentially disable form
+        const submitBtn = document.getElementById('contact-submit-btn');
+        if(submitBtn) submitBtn.disabled = true;
+        return;
+    }
 
-<?php require_once 'templates/footer.php'; ?>
+    const contactForm = document.getElementById('contact-us-form');
+    const submitButton = document.getElementById('contact-submit-btn');
+    const feedbackDiv = document.getElementById('contact-feedback-message');
+
+    contactForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        feedbackDiv.textContent = '';
+        feedbackDiv.style.display = 'none';
+
+        const name = document.getElementById('contact-name').value.trim();
+        const email = document.getElementById('contact-email').value.trim();
+        const subject = document.getElementById('contact-subject').value.trim();
+        const message = document.getElementById('contact-message').value.trim();
+
+        if (!name || !email || !subject || !message) {
+            feedbackDiv.textContent = 'Please fill in all fields.';
+            feedbackDiv.className = 'message error-message';
+            feedbackDiv.style.display = 'block';
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            feedbackDiv.textContent = 'Please enter a valid email address.';
+            feedbackDiv.className = 'message error-message';
+            feedbackDiv.style.display = 'block';
+            return;
+        }
+
+        const originalButtonText = submitButton.textContent;
+        submitButton.textContent = 'Sending...';
+        submitButton.disabled = true;
+
+        const payload = { name, email, subject, message };
+
+        // Using raw fetch as this is a public form, no auth token needed typically
+        // If your contact API is protected, you'd use authenticatedFetch (but that implies user is logged in)
+        fetch(APP_CONFIG.baseApiUrl + '/contact-submission', { // Example endpoint
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+        .then(({ok, status, data}) => {
+            if (ok && data.status === 'success') {
+                feedbackDiv.textContent = data.message || 'Thank you for your message! We will get back to you shortly.';
+                feedbackDiv.className = 'message success-message';
+                contactForm.reset();
+            } else {
+                // Prioritize error message from API response body
+                throw new Error(data.message || data.error || `Failed to send message: Server responded with status ${status}`);
+            }
+        })
+        .catch(error => {
+            console.error('Contact form submission error:', error);
+            feedbackDiv.textContent = `Error: ${error.message}`;
+            feedbackDiv.className = 'message error-message';
+        })
+        .finally(() => {
+            submitButton.textContent = originalButtonText;
+            submitButton.disabled = false;
+            feedbackDiv.style.display = 'block';
+        });
+    });
+});
+</script>
+
+<?php require_once 'templates/footer_website.php'; ?>

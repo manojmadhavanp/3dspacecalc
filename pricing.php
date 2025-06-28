@@ -1,6 +1,6 @@
 <?php
 $pageTitle = "Pricing";
-require_once 'templates/header.php';
+require_once 'templates/header_website.php';
 ?>
 
 <h2 class="page-title">Our Pricing Plans</h2>
@@ -237,4 +237,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
-<?php require_once 'templates/footer.php'; ?>
+<?php require_once 'templates/footer_website.php'; ?>

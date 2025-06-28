@@ -1,9 +1,9 @@
 <?php
 $pageTitle = "About Us";
-require_once 'templates/header.php';
+require_once 'templates/header_website.php';
 ?>
 
-<h2 class="page-title">About FreightCalc Solutions</h2>
+<h2 class="page-title">About XACTLOAD</h2>
 
 <p>FreightCalc Solutions was founded with a mission to revolutionize the logistics and freight industry through innovative technology. We understand the complexities involved in container stuffing, client management, and the need for accurate, timely reporting. Our platform is designed by industry experts and software engineers passionate about solving real-world challenges for businesses like yours.</p>
 
@@ -18,4 +18,4 @@ require_once 'templates/header.php';
  secciones
 <p><em>(Placeholder for more detailed company history, team bios, or values)</em></p>
 
-<?php require_once 'templates/footer.php'; ?>
+<?php require_once 'templates/footer_website.php'; ?>

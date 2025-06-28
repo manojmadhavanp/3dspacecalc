@@ -1,9 +1,9 @@
 <?php
 require_once 'check_session.php'; // Ensures user is logged in
 $pageTitle = "Account Settings";
-require_once __DIR__ . '/../templates/header.php'; // Provides APP_CONFIG
+require_once __DIR__ . '/../templates/header_app.php'; // Use APP header
 ?>
-
+<?php /* Specific styles for account_settings.php, body class 'app-layout' is set in header_app.php */ ?>
 <style>
     .settings-container { max-width: 700px; margin: 20px auto; }
     .settings-section { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px; }
@@ -340,5 +340,5 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <?php
-require_once __DIR__ . '/../templates/footer.php';
+require_once __DIR__ . '/../templates/footer_app.php'; // Use APP footer
 ?>

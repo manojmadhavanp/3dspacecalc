@@ -12,21 +12,29 @@ $pageTitle = "Reset Password";
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($pageTitle); ?> - <?php echo APP_NAME; ?></title>
-    <link rel="stylesheet" href="/css/style.css"> <!-- Assuming global style.css -->
-    <script>
-        if (typeof APP_CONFIG === 'undefined') {
-            window.APP_CONFIG = {
-                baseUrl: '<?php echo rtrim(BASE_URL, '/'); ?>',
-                baseApiUrl: '<?php echo rtrim(BASE_API_URL, '/'); ?>'
-            };
-        }
-    </script>
+    <link rel="stylesheet" href="/css/style.css">
+    <?php
+        // header_website.php will provide APP_CONFIG
+        require_once 'templates/header_website.php';
+    ?>
 </head>
-<body>
-    <div class="container" style="max-width: 400px; margin: 50px auto;">
-        <h2>Reset Your Password</h2>
+<?php /* Body tag is opened in header_website.php, add class for styling */ ?>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (!document.body.classList.contains('login-page-body')) {
+            document.body.classList.add('login-page-body');
+        }
+    });
+</script>
+<body class="login-page-body">
+    <div class="login-page-wrapper">
+        <div class="animated-blob blob1"></div>
+        <div class="animated-blob blob2"></div>
+        <div class="animated-blob blob3"></div>
 
-        <div id="reset-password-feedback" class="message" style="display: none;"></div>
+        <div class="container login-form-container" style="max-width: 400px; margin: 50px auto;">
+            <h2>Reset Your Password</h2>
+            <div id="reset-password-feedback" class="message" style="display: none;"></div>
 
         <form id="reset-password-form">
             <input type="hidden" id="reset-token" name="token" value="">
@@ -155,5 +163,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
-</body>
-</html>
+<?php require_once 'templates/footer_website.php'; // Use website footer ?>

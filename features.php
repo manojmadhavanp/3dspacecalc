@@ -1,6 +1,6 @@
 <?php
 $pageTitle = "Features";
-require_once 'templates/header.php';
+require_once 'templates/header_website.php';
 ?>
 
 <h2 class="page-title">Platform Features</h2>
@@ -57,4 +57,4 @@ require_once 'templates/header.php';
     <p>All user-specific data and tools are protected and accessible only via login credentials.</p>
 </div>
 
-<?php require_once 'templates/footer.php'; ?>
+<?php require_once 'templates/footer_website.php'; ?>

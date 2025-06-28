@@ -1,9 +1,9 @@
 <?php
 $pageTitle = "Home";
-require_once 'templates/header.php';
+require_once 'templates/header_website.php';
 ?>
 
-<h2 class="page-title">Welcome to FreightCalc Solutions!</h2>
+<h2 class="page-title">Welcome to XACTLOAD!</h2>
 <p class="text-center">Optimize your container stuffing, manage clients, and streamline your freight operations with our intuitive SaaS platform.</p>
 
 <div style="padding: 20px; margin-top:20px; background-color: #e9ecef; border-radius: 5px;">
@@ -26,4 +26,4 @@ require_once 'templates/header.php';
     <!-- You can add more sections like testimonials, partner logos etc. -->
 </div>
 
-<?php require_once 'templates/footer.php'; ?>
+<?php require_once 'templates/footer_website.php'; ?>

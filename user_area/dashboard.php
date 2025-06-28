@@ -4,9 +4,9 @@
 require_once 'check_session.php';
 
 $pageTitle = "Dashboard";
-// We need to adjust paths for header/footer as we are in a subdirectory
-require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/header_app.php'; // Use APP header
 ?>
+<?php /* Body class 'app-layout' is set in header_app.php */ ?>
 
 <h2 class="page-title">Welcome to Your Dashboard, <?php echo $user_first_name; ?>!</h2>
 
@@ -60,6 +60,5 @@ if (isset($_GET['payment_status'])) {
 </div>
 
 <?php
-// Adjust path for footer
-require_once __DIR__ . '/../templates/footer.php';
+require_once __DIR__ . '/../templates/footer_app.php'; // Use APP footer
 ?>
