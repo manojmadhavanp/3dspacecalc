@@ -1,301 +1,61 @@
 <?php
-require_once 'check_session.php'; // Ensures user is logged in, provides $user_first_name
-require_once __DIR__ . '/../db_connect.php'; // Ensures $conn is available, and generateUUID()
-
+require_once 'check_session.php'; // Still useful for initial page access protection if direct access is attempted.
+                                 // Actual feature authorization will be API-driven & client-side role checks.
 $pageTitle = "Manage Company Users";
-require_once __DIR__ . '/../templates/header.php';
-
-$feedback_message = '';
-$feedback_type = ''; // 'success' or 'error'
-
-// --- Authorization Check: Only Company Admins can manage users ---
-$isCompanyAdmin = false;
-if (isset($_SESSION['user_role_ruid']) && $_SESSION['user_role_ruid'] === 'COMPANY_ADMIN_ROLE_UID') {
-    $isCompanyAdmin = true;
-}
-
-if (!$isCompanyAdmin) {
-    echo "<div class='container'><p class='message error-message'>You do not have permission to manage company users. Please contact your company administrator.</p></div>";
-    require_once __DIR__ . '/../templates/footer.php';
-    exit;
-}
-
-// Get current user's CompanyID and subscription details
-$currentCompanyID = null;
-$maxUsersAllowed = 0;
-$currentUserCount = 0;
-$companyPackageName = 'N/A';
-
-if (isset($_SESSION['user_uid'])) {
-    $user_uid = $_SESSION['user_uid']; // This is the admin's UID
-    $stmt_company_info = $conn->prepare(
-        "SELECT u.CompanyID, cs.PackageName, cs.MaxUsers
-         FROM users u
-         JOIN company_subscription cs ON u.CompanyID = cs.CompanyID
-         WHERE u.UID = ?"
-    );
-    if ($stmt_company_info) {
-        $stmt_company_info->bind_param("i", $user_uid);
-        $stmt_company_info->execute();
-        $result_company_info = $stmt_company_info->get_result();
-        if ($company_info = $result_company_info->fetch_assoc()) {
-            $currentCompanyID = $company_info['CompanyID'];
-            $maxUsersAllowed = (int)$company_info['MaxUsers'];
-            $companyPackageName = $company_info['PackageName'];
-        } else {
-            $feedback_message = "Error: Could not retrieve your company or subscription details.";
-            $feedback_type = 'error';
-        }
-        $stmt_company_info->close();
-    } else {
-        $feedback_message = "Database error (company/sub prepare): " . $conn->error;
-        $feedback_type = 'error';
-        error_log("Error preparing to get company/sub details for admin UID {$user_uid}: " . $conn->error);
-    }
-} else {
-    // Should not happen if check_session is working
-    $feedback_message = "Error: User session not found.";
-    $feedback_type = 'error';
-}
-
-// --- Handle Form Submissions (Add/Edit User) ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $currentCompanyID && $isCompanyAdmin) {
-    $action_user = $_POST['action_user'] ?? '';
-
-    if ($action_user === 'add_user') {
-        $newUserFirstName = trim($_POST['newUserFirstName'] ?? '');
-        $newUserLastName = trim($_POST['newUserLastName'] ?? '');
-        $newUserEmail = trim($_POST['newUserEmail'] ?? '');
-        $newUserPhone = trim($_POST['newUserPhone'] ?? '');
-        $newUserRoleID = (int)($_POST['newUserRoleID'] ?? 0); // Make sure this role is valid for the company
-        $newUserPassword = $_POST['newUserPassword'] ?? '';
-
-        // Fetch current user count before adding
-        $stmt_count = $conn->prepare("SELECT COUNT(UID) as UserCount FROM users WHERE CompanyID = ?");
-        if ($stmt_count) {
-            $stmt_count->bind_param("i", $currentCompanyID);
-            $stmt_count->execute();
-            $count_result = $stmt_count->get_result()->fetch_assoc();
-            $currentUserCount = (int)$count_result['UserCount'];
-            $stmt_count->close();
-        } else {
-            $feedback_message = "Error checking current user count: " . $conn->error;
-            $feedback_type = 'error';
-        }
-
-
-        if (empty($newUserFirstName) || empty($newUserLastName) || empty($newUserEmail) || empty($newUserRoleID) || empty($newUserPassword)) {
-            $feedback_message = "All fields for the new user are required.";
-            $feedback_type = 'error';
-        } elseif (!filter_var($newUserEmail, FILTER_VALIDATE_EMAIL)) {
-            $feedback_message = "Invalid email format for the new user.";
-            $feedback_type = 'error';
-        } elseif (strlen($newUserPassword) < 8) {
-            $feedback_message = "Password must be at least 8 characters long.";
-            $feedback_type = 'error';
-        } elseif ($maxUsersAllowed > 0 && $currentUserCount >= $maxUsersAllowed) {
-            $feedback_message = "Cannot add new user. Your company has reached the maximum of {$maxUsersAllowed} users for the '{$companyPackageName}' plan. Please <a href='../pricing.php'>upgrade your plan</a>.";
-            $feedback_type = 'error';
-        } else {
-            // Check if email or phone already exists
-            $stmt_check = $conn->prepare("SELECT UID FROM users WHERE Email = ? OR PhoneNumber = ?");
-            if ($stmt_check) {
-                $stmt_check->bind_param("ss", $newUserEmail, $newUserPhone);
-                $stmt_check->execute();
-                if ($stmt_check->get_result()->num_rows > 0) {
-                    $feedback_message = "A user with this email or phone number already exists.";
-                    $feedback_type = 'error';
-                }
-                $stmt_check->close();
-            } else {
-                 $feedback_message = "DB error (user check): " . $conn->error;
-                 $feedback_type = 'error';
-            }
-
-            if ($feedback_type !== 'error') { // Proceed if no errors so far
-                $conn->begin_transaction();
-                try {
-                    $userUUID = generateUUID();
-                    $stmt_add_user = $conn->prepare("INSERT INTO users (UUID, FirstName, LastName, Email, PhoneNumber, CompanyID, RID) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                    if (!$stmt_add_user) throw new Exception("User insert prepare failed: " . $conn->error);
-                    $stmt_add_user->bind_param("sssssii", $userUUID, $newUserFirstName, $newUserLastName, $newUserEmail, $newUserPhone, $currentCompanyID, $newUserRoleID);
-                    if (!$stmt_add_user->execute()) throw new Exception("User insert execution failed: " . $stmt_add_user->error);
-                    $newlyAddedUserID = $stmt_add_user->insert_id;
-                    $stmt_add_user->close();
-
-                    $hashedPassword = password_hash($newUserPassword, PASSWORD_DEFAULT);
-                    // New users added by admin are 'active'. Trial status is company-wide.
-                    $initialUserStatus = 'active';
-                    $stmt_add_auth = $conn->prepare("INSERT INTO auth (UID, PasswordEncrypted, Status) VALUES (?, ?, ?)");
-                    if (!$stmt_add_auth) throw new Exception("Auth insert prepare failed: " . $conn->error);
-                    $stmt_add_auth->bind_param("iss", $newlyAddedUserID, $hashedPassword, $initialUserStatus);
-                    if (!$stmt_add_auth->execute()) throw new Exception("Auth insert execution failed: " . $stmt_add_auth->error);
-                    $stmt_add_auth->close();
-
-                    $conn->commit();
-                    $feedback_message = "User '" . htmlspecialchars($newUserFirstName . " " . $newUserLastName) . "' added successfully!";
-                    $feedback_type = 'success';
-                } catch (Exception $e) {
-                    $conn->rollback();
-                    $feedback_message = "Error adding user: " . $e->getMessage();
-                    $feedback_type = 'error';
-                    error_log("Add company user error: " . $e->getMessage());
-                }
-            }
-        }
-    } elseif ($action_user === 'update_user_status') {
-        $userToUpdateUID = (int)($_POST['userToUpdateUID'] ?? 0);
-        $newStatus = trim($_POST['newStatus'] ?? ''); // e.g., 'active', 'inactive'
-
-        // Prevent admin from deactivating themselves or the primary company contact (if such logic exists)
-        // For simplicity, just check if it's not their own UID
-        if ($userToUpdateUID === $_SESSION['user_uid']) {
-            $feedback_message = "You cannot change your own status.";
-            $feedback_type = 'error';
-        } elseif (in_array($newStatus, ['active', 'inactive', 'suspended'])) {
-            // Ensure userToUpdateUID belongs to currentCompanyID
-            $stmt_check_owner = $conn->prepare("SELECT UID FROM users WHERE UID = ? AND CompanyID = ?");
-            if($stmt_check_owner){
-                $stmt_check_owner->bind_param("ii", $userToUpdateUID, $currentCompanyID);
-                $stmt_check_owner->execute();
-                if($stmt_check_owner->get_result()->num_rows == 1){
-                    $stmt_update_status = $conn->prepare("UPDATE auth SET Status = ? WHERE UID = ?");
-                    if($stmt_update_status){
-                        $stmt_update_status->bind_param("si", $newStatus, $userToUpdateUID);
-                        if ($stmt_update_status->execute()) {
-                            $feedback_message = "User status updated successfully.";
-                            $feedback_type = 'success';
-                        } else {
-                            $feedback_message = "Error updating user status: " . $stmt_update_status->error;
-                            $feedback_type = 'error';
-                        }
-                        $stmt_update_status->close();
-                    } else {
-                        $feedback_message = "DB error (update status prepare): " . $conn->error;
-                        $feedback_type = 'error';
-                    }
-                } else {
-                     $feedback_message = "User not found in your company.";
-                     $feedback_type = 'error';
-                }
-                $stmt_check_owner->close();
-            } else {
-                $feedback_message = "DB error (check owner prepare): " . $conn->error;
-                $feedback_type = 'error';
-            }
-        } else {
-            $feedback_message = "Invalid status value.";
-            $feedback_type = 'error';
-        }
-    }
-    // TODO: Implement Edit User Role logic if needed
-}
-
-
-// --- Fetch Data for Display ---
-$company_users_list = [];
-$available_roles = []; // Roles that can be assigned within a company
-
-if ($currentCompanyID && $isCompanyAdmin) {
-    // Fetch users of the current company
-    $stmt_users = $conn->prepare(
-        "SELECT u.UID, u.FirstName, u.LastName, u.Email, u.PhoneNumber, r.RoleName, a.Status, a.LastLogin
-         FROM users u
-         JOIN roles r ON u.RID = r.RID
-         JOIN auth a ON u.UID = a.UID
-         WHERE u.CompanyID = ?
-         ORDER BY u.LastName, u.FirstName"
-    );
-    if ($stmt_users) {
-        $stmt_users->bind_param("i", $currentCompanyID);
-        $stmt_users->execute();
-        $result_users = $stmt_users->get_result();
-        while ($row = $result_users->fetch_assoc()) {
-            $company_users_list[] = $row;
-        }
-        $currentUserCount = count($company_users_list); // Update current user count after any additions/deletions
-        $stmt_users->close();
-    } else {
-        $feedback_message = "Error fetching company users: " . $conn->error;
-        $feedback_type = 'error';
-    }
-
-    // Fetch assignable roles (e.g., 'User', maybe others, but not 'Admin' (system-wide admin))
-    // For now, hardcoding 'USER_ROLE_UID' as the assignable one.
-    $assignableRoleRUID = 'USER_ROLE_UID';
-    $stmt_roles = $conn->prepare("SELECT RID, RoleName FROM roles WHERE RoleRUID = ? OR RoleRUID = 'COMPANY_ADMIN_ROLE_UID'"); // Allow assigning CompanyAdmin too
-     if ($stmt_roles) {
-        $stmt_roles->bind_param("s", $assignableRoleRUID);
-        $stmt_roles->execute();
-        $result_roles = $stmt_roles->get_result();
-        while ($row = $result_roles->fetch_assoc()) {
-            $available_roles[] = $row;
-        }
-        $stmt_roles->close();
-    } else {
-        $feedback_message = "Error fetching assignable roles: " . $conn->error;
-        $feedback_type = 'error';
-    }
-}
+require_once __DIR__ . '/../templates/header.php'; // Provides APP_CONFIG
 ?>
 
 <style>
+    /* Styles specific to company_users.php, can be moved or merged */
     .users-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
     .users-table th, .users-table td { border: 1px solid #ddd; padding: 10px; text-align: left; }
     .users-table th { background-color: #f2f2f2; }
-    .form-container { border:1px solid #ddd; padding:20px; border-radius:5px; margin-top:20px; background-color:#f9f9f9; }
-    /* Other styles from clients.php can be reused or put in global CSS */
+    .users-table td select { padding: 5px; border-radius: 3px; border: 1px solid #ccc; }
+
+    .form-modal { /* Reusing modal style, could be global */
+        display: none; position: fixed; z-index: 1000; left: 0; top: 0;
+        width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);
+    }
+    .form-modal-content {
+        background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888;
+        width: 80%; max-width: 550px; border-radius: 8px; position: relative;
+    }
+    .form-modal .close-btn-modal {
+        color: #aaa; float: right; font-size: 28px; font-weight: bold;
+        position: absolute; top: 10px; right: 20px; cursor: pointer;
+    }
+    .form-container legend { font-size: 1.2em; font-weight: bold; margin-bottom: 10px; }
+    .form-container label { display: block; margin-bottom: 5px; font-weight: bold; }
+    .form-container input[type="text"],
+    .form-container input[type="email"],
+    .form-container input[type="tel"],
+    .form-container input[type="password"],
+    .form-container select {
+        width: calc(100% - 22px); padding: 10px; margin-bottom: 15px;
+        border: 1px solid #ccc; border-radius: 4px;
+    }
+    .form-container button[type="submit"] { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .form-container .cancel-btn-modal { background-color: #6c757d; margin-left:10px; color:white; padding: 10px 15px; border:none; border-radius:4px; cursor:pointer;}
+
+    .subscription-info { margin-bottom: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px; border: 1px solid #ced4da; }
+    .subscription-info p { margin: 5px 0; }
 </style>
 
-<h2 class="page-title">Manage Company Users</h2>
+<h2 class="page-title"><?php echo htmlspecialchars($pageTitle); ?></h2>
 
-<?php if ($feedback_message): ?>
-    <div class="message <?php echo ($feedback_type === 'success') ? 'success-message' : 'error-message'; ?>">
-        <?php echo $feedback_message; // Already HTML escaped if it came from user input, or is a system message ?>
-    </div>
-<?php endif; ?>
+<div id="company-users-feedback" class="message" style="display: none;"></div>
 
-<?php if ($currentCompanyID && $isCompanyAdmin): ?>
-    <div style="margin-bottom: 20px; padding: 10px; background-color: #eef; border-radius: 5px;">
-        <p><strong>Company:</strong> <?php /* We don't have company name here directly, could fetch if needed */ echo "Your Company"; ?></p>
-        <p><strong>Current Plan:</strong> <?php echo htmlspecialchars($companyPackageName); ?></p>
-        <p><strong>User Limit:</strong> <?php echo $currentUserCount; ?> / <?php echo ($maxUsersAllowed > 0) ? $maxUsersAllowed : 'Unlimited'; ?> Users</p>
-        <?php if ($maxUsersAllowed > 0 && $currentUserCount >= $maxUsersAllowed): ?>
-            <p style="color:red;">You have reached your user limit. <a href="../pricing.php">Upgrade Plan</a> to add more users.</p>
-        <?php endif; ?>
-    </div>
+<div id="subscription-info-container" class="subscription-info">
+    <p><strong>Current Plan:</strong> <span id="company-plan-name">Loading...</span></p>
+    <p><strong>User Limit:</strong> <span id="company-user-count">?</span> / <span id="company-max-users">?</span> Users</p>
+    <p id="user-limit-message" style="color:red; display:none;">You have reached your user limit. <a href="<?php echo rtrim(BASE_URL, '/'); ?>/pricing">Upgrade Plan</a> to add more users.</p>
+</div>
 
-    <?php if (($maxUsersAllowed === 0 || $currentUserCount < $maxUsersAllowed)): ?>
-    <div class="form-container">
-        <form action="company_users.php" method="POST">
-            <input type="hidden" name="action_user" value="add_user">
-            <fieldset>
-                <legend>Add New User</legend>
-                <div><label for="newUserFirstName">First Name:</label><input type="text" name="newUserFirstName" required></div>
-                <div><label for="newUserLastName">Last Name:</label><input type="text" name="newUserLastName" required></div>
-                <div><label for="newUserEmail">Email:</label><input type="email" name="newUserEmail" required></div>
-                <div><label for="newUserPhone">Phone Number:</label><input type="tel" name="newUserPhone"></div>
-                <div>
-                    <label for="newUserRoleID">Role:</label>
-                    <select name="newUserRoleID" required style="padding:10px; width:100%; margin-bottom:15px;">
-                        <option value="">-- Select Role --</option>
-                        <?php foreach($available_roles as $role):
-                            // Typically, don't allow assigning system 'Admin' role from here.
-                            if ($role['RoleName'] !== 'Admin') {
-                        ?>
-                            <option value="<?php echo $role['RID']; ?>"><?php echo htmlspecialchars($role['RoleName']); ?></option>
-                        <?php } endforeach; ?>
-                    </select>
-                </div>
-                <div><label for="newUserPassword">Set Initial Password (min 8 chars):</label><input type="password" name="newUserPassword" required minlength="8"></div>
-                <button type="submit">Add User</button>
-            </fieldset>
-        </form>
-    </div>
-    <?php endif; ?>
+<p style="margin-top:20px;">
+    <button type="button" id="show-add-user-form-btn" class="action-btn" style="background-color: #28a745;">+ Add New User</button>
+</p>
 
-    <h3 style="margin-top:30px;">Existing Company Users (<?php echo $currentUserCount; ?>)</h3>
-    <?php if (!empty($company_users_list)): ?>
+<div id="user-list-container">
     <table class="users-table">
         <thead>
             <tr>
@@ -307,45 +67,421 @@ if ($currentCompanyID && $isCompanyAdmin) {
                 <th>Actions</th>
             </tr>
         </thead>
-        <tbody>
-            <?php foreach ($company_users_list as $user): ?>
-            <tr>
-                <td><?php echo htmlspecialchars($user['FirstName'] . " " . $user['LastName']); ?></td>
-                <td><?php echo htmlspecialchars($user['Email']); ?><br><?php echo htmlspecialchars($user['PhoneNumber'] ?? 'N/A'); ?></td>
-                <td><?php echo htmlspecialchars($user['RoleName']); ?></td>
-                <td><?php echo htmlspecialchars(ucfirst($user['Status'])); ?></td>
-                <td><?php echo $user['LastLogin'] ? date('Y-m-d H:i', strtotime($user['LastLogin'])) : 'Never'; ?></td>
-                <td>
-                    <?php if ($user['UID'] !== $_SESSION['user_uid']): // Admin cannot change their own status here ?>
-                    <form action="company_users.php" method="POST" style="display:inline;">
-                        <input type="hidden" name="action_user" value="update_user_status">
-                        <input type="hidden" name="userToUpdateUID" value="<?php echo $user['UID']; ?>">
-                        <select name="newStatus" onchange="this.form.submit()" style="padding:5px;">
-                            <option value="active" <?php if($user['Status'] === 'active') echo 'selected'; ?>>Active</option>
-                            <option value="inactive" <?php if($user['Status'] === 'inactive') echo 'selected'; ?>>Inactive</option>
-                            <option value="suspended" <?php if($user['Status'] === 'suspended') echo 'selected'; ?>>Suspended</option>
-                        </select>
-                        noscript(<button type="submit">Set Status</button>)
-                    </form>
-                    <!-- Add Edit Role button/form here if needed -->
-                    <!-- Add Delete User button/form here if needed (careful with this!) -->
-                    <?php else: echo " (Your Account)"; endif; ?>
-                </td>
-            </tr>
-            <?php endforeach; ?>
+        <tbody id="company-users-table-body">
+            <tr><td colspan="6" style="text-align:center;">Loading users...</td></tr>
         </tbody>
     </table>
-    <?php else: ?>
-        <p>No other users found in your company yet.</p>
-    <?php endif; ?>
+</div>
 
-<?php elseif (!$isCompanyAdmin): ?>
-    <?php /* Message already shown at the top */ ?>
-<?php else: ?>
-    <p class="message error-message">Could not load company user management details. <?php echo htmlspecialchars($feedback_message); ?></p>
-<?php endif; ?>
+<!-- Add User Modal -->
+<div id="add-user-modal" class="form-modal">
+    <div class="form-modal-content">
+        <span class="close-btn-modal" id="close-add-user-modal-btn">&times;</span>
+        <form id="add-user-form" class="form-container">
+            <fieldset>
+                <legend>Add New User to Company</legend>
+                <div><label for="newUserFirstName">First Name:</label><input type="text" id="newUserFirstName" name="newUserFirstName" required></div>
+                <div><label for="newUserLastName">Last Name:</label><input type="text" id="newUserLastName" name="newUserLastName" required></div>
+                <div><label for="newUserEmail">Email:</label><input type="email" id="newUserEmail" name="newUserEmail" required></div>
+                <div><label for="newUserPhone">Phone Number (Optional):</label><input type="tel" id="newUserPhone" name="newUserPhone"></div>
+                <div>
+                    <label for="newUserRoleID">Role:</label>
+                    <select id="newUserRoleID" name="newUserRoleID" required>
+                        <option value="">-- Select Role --</option>
+                        <!-- Roles will be populated by JS if dynamic, or hardcoded if simple -->
+                        <!-- Example: <option value="ROLE_USER_ID_FROM_API">User</option> -->
+                        <!-- Example: <option value="ROLE_COMPANY_ADMIN_ID_FROM_API">Company Admin</option> -->
+                    </select>
+                </div>
+                <div><label for="newUserPassword">Set Initial Password (min 8 chars):</label><input type="password" id="newUserPassword" name="newUserPassword" required minlength="8"></div>
+                <button type="submit" id="save-new-user-btn">Add User</button>
+                <button type="button" class="cancel-btn-modal" id="cancel-add-user-form-btn">Cancel</button>
+            </fieldset>
+        </form>
+    </div>
+</div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof APP_CONFIG === 'undefined' || !APP_CONFIG.baseApiUrl) {
+        console.error('APP_CONFIG with baseApiUrl is not defined.');
+        const feedbackDiv = document.getElementById('company-users-feedback');
+        feedbackDiv.textContent = 'Application configuration error.';
+        feedbackDiv.className = 'message error-message';
+        feedbackDiv.style.display = 'block';
+        document.getElementById('company-users-table-body').innerHTML = '<tr><td colspan="6" style="text-align:center;color:red;">App Config Error</td></tr>';
+        return;
+    }
+
+    // --- DOM Elements ---
+    const feedbackDiv = document.getElementById('company-users-feedback');
+    const usersTableBody = document.getElementById('company-users-table-body');
+    // Subscription Info Elements
+    const companyPlanNameSpan = document.getElementById('company-plan-name');
+    const companyUserCountSpan = document.getElementById('company-user-count');
+    const companyMaxUsersSpan = document.getElementById('company-max-users');
+    const userLimitMessageP = document.getElementById('user-limit-message');
+    const showAddUserBtn = document.getElementById('show-add-user-form-btn');
+
+    // Add User Modal Elements
+    const addUserModal = document.getElementById('add-user-modal');
+    const closeAddUserModalBtn = document.getElementById('close-add-user-modal-btn');
+    const cancelAddUserBtn = document.getElementById('cancel-add-user-form-btn');
+    const addUserForm = document.getElementById('add-user-form');
+    const newUserRoleIDSelect = document.getElementById('newUserRoleID');
+
+
+    // --- Helper Functions ---
+    function displayFeedback(message, type = 'error') {
+        feedbackDiv.textContent = message;
+        feedbackDiv.className = `message ${type === 'success' ? 'success-message' : 'error-message'}`;
+        feedbackDiv.style.display = 'block';
+    }
+
+    function getAuthToken() {
+        const token = localStorage.getItem('authToken');
+        if (!token) {
+            displayFeedback('Authentication error. Please login again.');
+            // Potentially redirect: window.location.href = APP_CONFIG.baseUrl + '/login';
+            return null;
+        }
+        return token;
+    }
+
+    // --- Modal Logic for Add User ---
+    function openAddUserModal() {
+        addUserForm.reset();
+        // TODO: Populate #newUserRoleID select with roles fetched from an API or predefined
+        // For now, assuming some roles might be hardcoded or fetched separately.
+        // Example: fetchRolesAndPopulateSelect();
+        addUserModal.style.display = 'block';
+    }
+    function closeAddUserModal() {
+        addUserModal.style.display = 'none';
+    }
+    showAddUserBtn.addEventListener('click', openAddUserModal);
+    closeAddUserModalBtn.addEventListener('click', closeAddUserModal);
+    cancelAddUserBtn.addEventListener('click', closeAddUserModal);
+    window.addEventListener('click', function(event) {
+        if (event.target == addUserModal) closeAddUserModal();
+    });
+
+    let currentCompanyMaxUsers = 0;
+    let currentCompanyUserCount = 0;
+
+    // --- Fetch Company Users and Subscription Info ---
+    function fetchCompanyData() {
+        usersTableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Loading company data...</td></tr>';
+        companyPlanNameSpan.textContent = 'Loading...';
+        companyUserCountSpan.textContent = '?';
+        companyMaxUsersSpan.textContent = '?';
+        userLimitMessageP.style.display = 'none';
+        showAddUserBtn.disabled = true; // Disable until limits known
+
+        const authToken = getAuthToken();
+        if (!authToken) {
+            usersTableBody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Authentication required.</td></tr>';
+            return;
+        }
+
+        // Assuming API endpoint /company/details or similar that returns users and subscription info
+        // Or two separate calls: /company/users and /company/subscription
+        // For this example, let's assume one endpoint /company/users returns all needed info:
+        // { success: true, data: { users: [...], subscription: { packageName, maxUsers, currentUserCount (or derive from users.length) } } }
+        // Or, if API for users is just /users?company_id=current, and another for subscription.
+        // Let's assume GET /company/users returns users and subscription details for the admin's company
+        fetch(APP_CONFIG.baseApiUrl + '/company/users', { // This endpoint needs to be defined in backend
+            method: 'GET',
+            headers: {
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.status === 401) {
+                localStorage.removeItem('authToken');
+                window.dispatchEvent(new CustomEvent('authChange'));
+                throw new Error('Session expired. Please login again.');
+            }
+            if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.message || err.error || `API Error: ${response.status}`); })
+                               .catch(() => { throw new Error(`API Error: ${response.status} ${response.statusText}`); });
+            }
+            return response.json();
+        })
+        .then(result => {
+            if (result.status === 'success' && result.data) {
+                const companyData = result.data;
+
+                // Populate Subscription Info
+                if (companyData.subscription) {
+                    companyPlanNameSpan.textContent = companyData.subscription.packageName || 'N/A';
+                    currentCompanyUserCount = companyData.users ? companyData.users.length : (companyData.subscription.currentUserCount || 0);
+                    currentCompanyMaxUsers = parseInt(companyData.subscription.maxUsers) || 0; // 0 for unlimited
+
+                    companyUserCountSpan.textContent = currentCompanyUserCount;
+                    companyMaxUsersSpan.textContent = currentCompanyMaxUsers === 0 ? 'Unlimited' : currentCompanyMaxUsers;
+
+                    if (currentCompanyMaxUsers > 0 && currentCompanyUserCount >= currentCompanyMaxUsers) {
+                        userLimitMessageP.style.display = 'block';
+                        showAddUserBtn.disabled = true;
+                        showAddUserBtn.title = 'User limit reached for your current plan.';
+                    } else {
+                        userLimitMessageP.style.display = 'none';
+                        showAddUserBtn.disabled = false;
+                        showAddUserBtn.title = 'Add a new user to your company';
+                    }
+                } else {
+                    companyPlanNameSpan.textContent = 'Unknown';
+                    companyMaxUsersSpan.textContent = 'Unknown';
+                    showAddUserBtn.disabled = true; // Can't determine limits
+                     displayFeedback('Could not load subscription details.', 'error');
+                }
+
+                // Populate Users Table
+                usersTableBody.innerHTML = ''; // Clear loading
+                if (companyData.users && companyData.users.length > 0) {
+                    companyData.users.forEach(user => {
+                        const row = usersTableBody.insertRow();
+                        row.insertCell().textContent = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+                        row.insertCell().innerHTML = `${user.email || 'N/A'}<br><small>${user.phoneNumber || 'N/A'}</small>`;
+                        row.insertCell().textContent = user.roleName || 'N/A'; // Assuming roleName is provided
+
+                        const statusCell = row.insertCell();
+                        statusCell.textContent = user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'N/A';
+
+                        row.insertCell().textContent = user.lastLogin ? new Date(user.lastLogin).toLocaleString() : 'Never';
+
+                        const actionsCell = row.insertCell();
+                        if (user.uid !== (JSON.parse(localStorage.getItem('userData'))?.uid || null) ) { // Don't allow actions on self via this list for status
+                             // Status change will be a dropdown or buttons, implement in 4d
+                            actionsCell.innerHTML = `<select class="user-status-select" data-user-id="${user.uid}" data-current-status="${user.status}">
+                                <option value="active" ${user.status === 'active' ? 'selected' : ''}>Active</option>
+                                <option value="inactive" ${user.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+                                <option value="suspended" ${user.status === 'suspended' ? 'selected' : ''}>Suspended</option>
+                            </select>`;
+                        } else {
+                            actionsCell.textContent = '(Your Account)';
+                        }
+                    });
+                } else {
+                    usersTableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No users found in your company.</td></tr>';
+                }
+                 // Populate roles dropdown for "Add User" modal
+                populateRolesDropdown(companyData.assignableRoles || []);
+
+
+            } else {
+                throw new Error(result.message || result.error || 'Failed to load company data.');
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching company data:', error);
+            displayFeedback(`Error: ${error.message}`, 'error');
+            usersTableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red;">Failed to load data: ${error.message}</td></tr>`;
+            companyPlanNameSpan.textContent = 'Error';
+        });
+    }
+
+    function populateRolesDropdown(roles) {
+        newUserRoleIDSelect.innerHTML = '<option value=\"\">-- Select Role --</option>'; // Clear existing
+        if (roles && roles.length > 0) {
+            roles.forEach(role => {
+                const option = document.createElement('option');
+                option.value = role.rid; // Assuming API returns 'rid' and 'roleName'
+                option.textContent = role.roleName;
+                newUserRoleIDSelect.appendChild(option);
+            });
+        } else {
+            // Fallback or default roles if API doesn't provide them
+            // This is just an example, ideally API provides this.
+            const defaultRoles = [
+                { rid: 2, roleName: 'CompanyAdmin' }, // Assuming RID 2 = CompanyAdmin from schema
+                { rid: 3, roleName: 'User' }          // Assuming RID 3 = User from schema
+            ];
+             defaultRoles.forEach(role => {
+                if (role.roleName !== 'Admin') { // Prevent assigning system-wide Admin
+                    const option = document.createElement('option');
+                    option.value = role.rid;
+                    option.textContent = role.roleName;
+                    newUserRoleIDSelect.appendChild(option);
+                }
+            });
+            console.warn("Assignable roles not provided by API, using hardcoded defaults for Add User form.");
+        }
+    }
+
+
+    // Initial data load
+    fetchCompanyData();
+
+    // --- Handle User Status Change ---
+    usersTableBody.addEventListener('change', function(event) {
+        if (event.target.classList.contains('user-status-select')) {
+            const selectElement = event.target;
+            const userId = selectElement.dataset.userId;
+            const currentStatus = selectElement.dataset.currentStatus;
+            const newStatus = selectElement.value;
+
+            if (newStatus === currentStatus) {
+                return; // No change
+            }
+
+            if (!confirm(`Are you sure you want to change status for user ID ${userId} from '${currentStatus}' to '${newStatus}'?`)) {
+                selectElement.value = currentStatus; // Revert dropdown if cancelled
+                return;
+            }
+
+            const authToken = getAuthToken();
+            if (!authToken) {
+                selectElement.value = currentStatus; // Revert
+                return;
+            }
+
+            // Disable select while processing to prevent rapid changes
+            selectElement.disabled = true;
+            displayFeedback('Updating user status...', 'info');
+
+            fetch(`${APP_CONFIG.baseApiUrl}/company/users/${userId}/status`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + authToken,
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ status: newStatus })
+            })
+            .then(response => {
+                if (response.status === 401) { throw new Error('Session expired.'); }
+                return response.json().then(result => ({ ok: response.ok, status: response.status, result }));
+            })
+            .then(({ ok, status, result }) => {
+                if (!ok) {
+                    let errorMsg = result.message || result.error || `Failed to update status: ${status}`;
+                    if (result.errors) {
+                        errorMsg += ` Details: ${Object.values(result.errors).flat().join(' ')}`;
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                if (result.status === 'success') {
+                    displayFeedback(result.message || 'User status updated successfully!', 'success');
+                    // Update the data-current-status attribute and the text in the status cell
+                    selectElement.dataset.currentStatus = newStatus;
+                    // Find the status text cell for this row to update it visually
+                    const statusTextCell = selectElement.closest('tr').cells[3]; // Assuming status is the 4th cell (index 3)
+                    if (statusTextCell) {
+                        statusTextCell.textContent = newStatus.charAt(0).toUpperCase() + newStatus.slice(1);
+                    } else { // Fallback to refresh the whole list if cell not found
+                        fetchCompanyData();
+                    }
+                } else {
+                    throw new Error(result.message || result.error || 'API indicated failure for status update.');
+                }
+            })
+            .catch(error => {
+                console.error('Error updating user status:', error);
+                displayFeedback(`Error: ${error.message}`, 'error');
+                selectElement.value = currentStatus; // Revert dropdown on error
+            })
+            .finally(() => {
+                selectElement.disabled = false; // Re-enable select
+            });
+        }
+    });
+
+    // --- Add User Form Submission ---
+    addUserForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        displayFeedback('', 'success'); // Clear previous messages
+
+        // Check user limit again before proceeding
+        if (currentCompanyMaxUsers > 0 && currentCompanyUserCount >= currentCompanyMaxUsers) {
+            displayFeedback('Cannot add user: User limit reached for your current plan. Please upgrade.', 'error');
+            userLimitMessageP.style.display = 'block'; // Ensure message is visible
+            showAddUserBtn.disabled = true;
+            closeAddUserModal(); // Close modal as action cannot be performed
+            return;
+        }
+
+        const firstName = document.getElementById('newUserFirstName').value.trim();
+        const lastName = document.getElementById('newUserLastName').value.trim();
+        const email = document.getElementById('newUserEmail').value.trim();
+        const phone = document.getElementById('newUserPhone').value.trim();
+        const roleId = newUserRoleIDSelect.value;
+        const password = document.getElementById('newUserPassword').value;
+
+        // Client-side validation
+        if (!firstName || !lastName || !email || !roleId || !password) {
+            displayFeedback('All fields (except optional phone) are required for new user.', 'error');
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            displayFeedback('Invalid email format.', 'error');
+            return;
+        }
+        if (password.length < 8) {
+            displayFeedback('Password must be at least 8 characters long.', 'error');
+            return;
+        }
+
+        const payload = { firstName, lastName, email, phoneNumber: phone, roleId, password };
+        const saveButton = document.getElementById('save-new-user-btn');
+        const originalButtonText = saveButton.textContent;
+        saveButton.textContent = 'Adding User...';
+        saveButton.disabled = true;
+
+        const authToken = getAuthToken();
+        if (!authToken) {
+            saveButton.textContent = originalButtonText;
+            saveButton.disabled = false;
+            return; /* getAuthToken already calls displayFeedback */
+        }
+
+        fetch(APP_CONFIG.baseApiUrl + '/company/users', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => {
+            if (response.status === 401) { /* ... */ throw new Error('Session expired.'); }
+            return response.json().then(result => ({ ok: response.ok, status: response.status, result }));
+        })
+        .then(({ ok, status, result }) => {
+            if (!ok) { // HTTP error status (400, 403, 409, 500 etc.)
+                let errorMsg = result.message || result.error || `Failed to add user: ${status}`;
+                if (result.errors) { // Field specific errors
+                    const fieldErrors = Object.values(result.errors).flat().join(' ');
+                    errorMsg += ` Details: ${fieldErrors}`;
+                }
+                throw new Error(errorMsg);
+            }
+            // If response.ok (e.g. 201 Created or 200 OK)
+            if (result.status === 'success') {
+                displayFeedback(result.message || 'User added successfully!', 'success');
+                closeAddUserModal();
+                fetchCompanyData(); // Refresh user list and counts
+            } else { // Should not happen if HTTP was ok and API follows standard
+                 throw new Error(result.message || result.error || 'API indicated failure but HTTP status was OK.');
+            }
+        })
+        .catch(error => {
+            console.error('Error adding user:', error);
+            displayFeedback(`Error: ${error.message}`, 'error');
+        })
+        .finally(() => {
+            saveButton.textContent = originalButtonText;
+            saveButton.disabled = false;
+        });
+    });
+});
+</script>
 
 <?php
-$conn->close();
 require_once __DIR__ . '/../templates/footer.php';
 ?>

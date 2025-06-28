@@ -396,23 +396,38 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => {
             if (response.status === 401) { /* ... (auth error handling) ... */ throw new Error('Session expired.'); }
-            // DELETE might return 204 No Content on success, or JSON
-            if (response.status === 204) { // Successfully deleted, no content
-                return { success: true, message: `Client "${clientName}" deleted successfully.` };
+            // Standardized JSON handling
+            if (response.status === 401) {
+                localStorage.removeItem('authToken');
+                window.dispatchEvent(new CustomEvent('authChange'));
+                throw new Error('Session expired. Please login again.');
             }
-            if (!response.ok) {
-                return response.json().then(errData => {
-                    throw new Error(errData.error || errData.message || `Failed to delete client: ${response.status}`);
-                }).catch(() => new Error(`Failed to delete client: ${response.status} ${response.statusText}`));
+
+            if (response.status === 204) { // Successfully soft deleted, no content returned by API
+                return { status: 'success', message: `Client "${clientName}" (ID: ${ccid}) has been deleted.` , data: { id: ccid } };
             }
-            return response.json(); // If API returns JSON on successful delete
+
+            // For 200 OK or other statuses, expect JSON
+            return response.json().then(result => {
+                if (!response.ok) { // HTTP error status (400, 403, 404, 500 etc.)
+                    throw new Error(result.message || result.error || `Failed to delete client: ${response.status}`);
+                }
+                // If response.ok (e.g. 200) and it has a body, check internal status
+                if (result.status !== 'success') {
+                     throw new Error(result.message || result.error || 'Failed to delete client due to an API processing issue.');
+                }
+                // Ensure message is present, or use a default
+                result.message = result.message || `Client "${clientName}" (ID: ${ccid}) deleted successfully.`;
+                return result;
+            });
         })
-        .then(data => {
-            if (data.success) {
-                displayFeedback(data.message || `Client "${clientName}" deleted successfully.`, 'success');
+        .then(result => { // result should now always have a status property if JSON was parsed
+            if (result.status === 'success') {
+                displayFeedback(result.message, 'success');
                 fetchClients(); // Refresh the client list
             } else {
-                throw new Error(data.error || data.message || 'Failed to delete client.');
+                // This else block might not be reached if errors are thrown above, but as a fallback.
+                throw new Error(result.message || 'An unknown error occurred while deleting the client.');
             }
         })
         .catch(error => {

@@ -88,49 +88,78 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
     }
 
-    // Placeholder for fetching current user data to populate profile form
-    // This would typically call an API like GET APP_CONFIG.baseApiUrl + '/user/profile'
     function loadUserProfile() {
         const authToken = localStorage.getItem('authToken');
+        const profileFeedback = document.getElementById('profile-feedback-message');
+
         if (!authToken) {
-            // Handle not authenticated - though check_session.php should prevent this page load
             console.warn("No auth token found for loading profile.");
+            if (profileFeedback) {
+                profileFeedback.textContent = 'Authentication error. Please login to view your profile.';
+                profileFeedback.className = 'message error-message';
+                profileFeedback.style.display = 'block';
+            }
+            // Potentially redirect to login or disable forms
+            document.getElementById('update-profile-form').style.display = 'none';
+            document.getElementById('change-password-form').style.display = 'none';
             return;
         }
 
-        // Example: Assuming API endpoint /user/me or /user/profile to get current user data
-        // fetch(APP_CONFIG.baseApiUrl + '/user/profile', { /* ... headers with auth ... */ })
-        // .then(response => response.json())
-        // .then(data => {
-        //     if (data.success && data.user) {
-        //         document.getElementById('profile-email').value = data.user.email || '';
-        //         document.getElementById('profile-firstName').value = data.user.firstName || '';
-        //         document.getElementById('profile-lastName').value = data.user.lastName || '';
-        //         document.getElementById('profile-phone').value = data.user.phone || data.user.phoneNumber || '';
-        //     } else {
-        //          console.error("Failed to load user profile", data.error || data.message);
-        //     }
-        // })
-        // .catch(error => console.error('Error loading user profile:', error));
+        // Assuming API endpoint is GET /user/profile or /auth/me to get current user data
+        fetch(APP_CONFIG.baseApiUrl + '/user/profile', { // Or '/auth/me' - adjust if API is different
+            method: 'GET',
+            headers: {
+                'Authorization': 'Bearer ' + authToken,
+                'Accept': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.status === 401) {
+                localStorage.removeItem('authToken'); // Token is invalid or expired
+                window.dispatchEvent(new CustomEvent('authChange')); // Update header
+                throw new Error('Session expired. Please login again.');
+            }
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || errData.message || `Failed to load profile: ${response.status}`);
+                }).catch(() => new Error(`Failed to load profile: ${response.status} ${response.statusText}`));
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success && data.user) {
+                document.getElementById('profile-email').value = data.user.email || '';
+                document.getElementById('profile-firstName').value = data.user.firstName || '';
+                document.getElementById('profile-lastName').value = data.user.lastName || '';
+                document.getElementById('profile-phone').value = data.user.phoneNumber || data.user.phone || ''; // API might use phoneNumber or phone
 
-        // For now, using placeholder or data potentially stored during login if API structure known
-        // If user data was stored in localStorage after login:
-        const storedUserData = JSON.parse(localStorage.getItem('userData')); // Assuming 'userData' is stored on login
-        if (storedUserData) {
-            document.getElementById('profile-email').value = storedUserData.email || '';
-            document.getElementById('profile-firstName').value = storedUserData.firstName || '';
-            document.getElementById('profile-lastName').value = storedUserData.lastName || '';
-            document.getElementById('profile-phone').value = storedUserData.phone || storedUserData.phoneNumber || '';
-        } else {
-            // Fallback if no data - user will have to fill it or it means login API needs to return this.
-            // The email might be non-editable and always fetched.
-            // For this placeholder, we'll assume the user might have to fill some fields
-            // or that the login API needs to provide these if they are to be pre-filled.
-            console.warn("No 'userData' found in localStorage to pre-fill profile. API call needed.");
-            // A dedicated API call for user profile is better.
-            // For now, let's assume the email can be pre-filled if we have a way to get it.
-            // The token itself might contain some info (if JWT), or a /me endpoint is standard.
-        }
+                // Store/update userData in localStorage if it's used elsewhere (e.g., header display name)
+                localStorage.setItem('userData', JSON.stringify(data.user));
+                // Dispatch event if header or other components need to know user data changed
+                window.dispatchEvent(new CustomEvent('userDataUpdated', { detail: { user: data.user } }));
+
+            } else {
+                 const errorMsg = data.error || data.message || "Could not parse user profile data.";
+                 console.error("Failed to load user profile data:", errorMsg);
+                 if (profileFeedback) {
+                    profileFeedback.textContent = `Could not load profile: ${errorMsg}`;
+                    profileFeedback.className = 'message error-message';
+                    profileFeedback.style.display = 'block';
+                 }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading user profile:', error);
+            if (profileFeedback) {
+                profileFeedback.textContent = `Error loading profile: ${error.message}`;
+                profileFeedback.className = 'message error-message';
+                profileFeedback.style.display = 'block';
+            }
+             if (error.message.includes("Session expired")) {
+                // Optional: redirect to login after a short delay
+                // setTimeout(() => { window.location.href = APP_CONFIG.baseUrl + '/login?session_expired=true'; }, 2000);
+            }
+        });
     }
     loadUserProfile(); // Call on page load
 

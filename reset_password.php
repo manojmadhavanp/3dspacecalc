@@ -1,80 +1,159 @@
+<?php
+// This file is now a frontend view.
+if (!defined('BASE_URL')) {
+    // Adjust path if this file moves, e.g., to a 'views/auth/' subdirectory
+    require_once __DIR__ . '/../config.php';
+}
+$pageTitle = "Reset Password";
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reset Password - SaaS Platform</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
-        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); max-width: 400px; margin: auto; margin-top: 50px; }
-        h2 { text-align: center; color: #333; }
-        label { display: block; margin-bottom: 8px; font-weight: bold; }
-        input[type="password"], input[type="hidden"] {
-            width: calc(100% - 22px);
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
+    <title><?php echo htmlspecialchars($pageTitle); ?> - <?php echo APP_NAME; ?></title>
+    <link rel="stylesheet" href="/css/style.css"> <!-- Assuming global style.css -->
+    <script>
+        if (typeof APP_CONFIG === 'undefined') {
+            window.APP_CONFIG = {
+                baseUrl: '<?php echo rtrim(BASE_URL, '/'); ?>',
+                baseApiUrl: '<?php echo rtrim(BASE_API_URL, '/'); ?>'
+            };
         }
-        input[type="submit"] {
-            background-color: #28a745; /* Green for reset */
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            width: 100%;
-        }
-        input[type="submit"]:hover { background-color: #218838; }
-        .message { margin-bottom: 15px; text-align: center; padding: 10px; border-radius: 4px; }
-        .error-message { color: #721c24; background-color: #f8d7da; border: 1px solid #f5c6cb; }
-        .success-message { color: #155724; background-color: #d4edda; border: 1px solid #c3e6cb; }
-        .login-link { text-align: center; margin-top: 15px; }
-        .login-link a { color: #007bff; text-decoration: none; }
-        .login-link a:hover { text-decoration: underline; }
-    </style>
+    </script>
 </head>
 <body>
-    <div class="container">
+    <div class="container" style="max-width: 400px; margin: 50px auto;">
         <h2>Reset Your Password</h2>
-        <?php
-        if (isset($_GET['error'])) {
-            echo '<p class="message error-message">' . htmlspecialchars($_GET['error']) . '</p>';
-        }
-        if (isset($_GET['success'])) {
-            echo '<p class="message success-message">' . htmlspecialchars($_GET['success']) . '</p>';
-            echo '<div class="login-link"><p><a href="login.php">Proceed to Login</a></p></div>';
-        }
 
-        $token = isset($_GET['token']) ? htmlspecialchars($_GET['token']) : '';
+        <div id="reset-password-feedback" class="message" style="display: none;"></div>
 
-        if (empty($token) && !isset($_GET['success'])) {
-            echo '<p class="message error-message">Invalid or missing reset token. Please request a new reset link.</p>';
-        } elseif (!isset($_GET['success'])) { // Only show form if no success message and token exists
-        ?>
-            <form action="handle_reset_password.php" method="POST">
-                <input type="hidden" name="token" value="<?php echo $token; ?>">
+        <form id="reset-password-form">
+            <input type="hidden" id="reset-token" name="token" value="">
 
-                <label for="new_password">New Password:</label>
+            <div class="form-group">
+                <label for="new_password">New Password (min. 8 characters):</label>
                 <input type="password" id="new_password" name="new_password" required minlength="8">
-
+            </div>
+            <div class="form-group">
                 <label for="confirm_password">Confirm New Password:</label>
                 <input type="password" id="confirm_password" name="confirm_password" required minlength="8">
-
-                <input type="submit" value="Reset Password">
-            </form>
-        <?php
-        } // End of form display condition
-
-        if (empty($token) && !isset($_GET['success'])) {
-             echo '<div class="login-link"><p><a href="forgot_password.php">Request a new link</a></p></div>';
-        }
-        ?>
-         <div class="login-link" style="margin-top: 20px;">
-            <p><a href="login.php">Back to Login</a></p>
+            </div>
+            <div style="margin-top:15px;">
+                <button type="submit" id="reset-password-btn">Reset Password</button>
+            </div>
+        </form>
+        <div id="login-link-container" style="text-align: center; margin-top: 15px; display:none;">
+            <p><a href="<?php echo rtrim(BASE_URL, '/'); ?>/login">Proceed to Login</a></p>
+        </div>
+         <div class="login-link" style="text-align: center; margin-top: 20px;">
+            <p><a href="<?php echo rtrim(BASE_URL, '/'); ?>/login">Back to Login</a> (if you don't have a token)</p>
         </div>
     </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof APP_CONFIG === 'undefined' || !APP_CONFIG.baseApiUrl) {
+        console.error('APP_CONFIG (baseApiUrl) is not defined.');
+        const feedbackDiv = document.getElementById('reset-password-feedback');
+        feedbackDiv.textContent = 'Application configuration error.';
+        feedbackDiv.className = 'message error-message';
+        feedbackDiv.style.display = 'block';
+        document.getElementById('reset-password-form').style.display = 'none'; // Hide form
+        return;
+    }
+
+    const resetPasswordForm = document.getElementById('reset-password-form');
+    const resetButton = document.getElementById('reset-password-btn');
+    const feedbackDiv = document.getElementById('reset-password-feedback');
+    const tokenInput = document.getElementById('reset-token');
+    const loginLinkContainer = document.getElementById('login-link-container');
+
+    // Get token from URL query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+
+    if (tokenFromUrl) {
+        tokenInput.value = tokenFromUrl;
+    } else {
+        feedbackDiv.textContent = 'Invalid or missing reset token in URL. Please use the link from your email.';
+        feedbackDiv.className = 'message error-message';
+        feedbackDiv.style.display = 'block';
+        resetPasswordForm.style.display = 'none'; // Hide form if no token
+    }
+
+    resetPasswordForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        feedbackDiv.textContent = '';
+        feedbackDiv.style.display = 'none';
+
+        const token = tokenInput.value;
+        const newPassword = document.getElementById('new_password').value;
+        const confirmPassword = document.getElementById('confirm_password').value;
+
+        // Client-side validation
+        if (!token) {
+            feedbackDiv.textContent = 'Reset token is missing. Cannot proceed.';
+            feedbackDiv.className = 'message error-message';
+            feedbackDiv.style.display = 'block';
+            return;
+        }
+        if (!newPassword || !confirmPassword) {
+            feedbackDiv.textContent = 'Please fill in both new password fields.';
+            feedbackDiv.className = 'message error-message';
+            feedbackDiv.style.display = 'block';
+            return;
+        }
+        if (newPassword.length < 8) {
+            feedbackDiv.textContent = 'New password must be at least 8 characters long.';
+            feedbackDiv.className = 'message error-message';
+            feedbackDiv.style.display = 'block';
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            feedbackDiv.textContent = 'New passwords do not match.';
+            feedbackDiv.className = 'message error-message';
+            feedbackDiv.style.display = 'block';
+            return;
+        }
+
+        resetButton.textContent = 'Resetting...';
+        resetButton.disabled = true;
+
+        fetch(APP_CONFIG.baseApiUrl + '/auth/reset-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({ token: token, newPassword: newPassword })
+        })
+        .then(response => {
+            return response.json().then(data => ({ ok: response.ok, status: response.status, data }));
+        })
+        .then(result => {
+            if (result.ok && result.data.success) {
+                feedbackDiv.textContent = result.data.message || 'Password has been reset successfully. You can now login.';
+                feedbackDiv.className = 'message success-message';
+                resetPasswordForm.style.display = 'none'; // Hide form on success
+                loginLinkContainer.style.display = 'block'; // Show login link
+            } else {
+                throw new Error(result.data.error || result.data.message || `Password reset failed: ${result.status}`);
+            }
+        })
+        .catch(error => {
+            console.error('Reset Password Error:', error);
+            feedbackDiv.textContent = error.message || 'An error occurred. Please try again or request a new reset link.';
+            feedbackDiv.className = 'message error-message';
+        })
+        .finally(() => {
+            resetButton.textContent = 'Reset Password';
+            resetButton.disabled = false;
+            feedbackDiv.style.display = 'block';
+        });
+    });
+});
+</script>
+
 </body>
 </html>
