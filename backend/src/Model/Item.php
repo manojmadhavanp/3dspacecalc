@@ -16,12 +16,17 @@ class Item {
 
     public int $originalQtyIndex = 0;
     public string $category = '';
-    public ?array $placement = null;
+    public ?array $placement = null; // Stores final placement data for an individual item instance
+    public ?float $maxSupportWeightKgOverride = null; // User-defined override for how much this item can support
+    public ?string $placementFailureReason = null; // Reason why this item couldn't be placed (set by services)
+
+    public const EPSILON_COMPARISON = 0.01; // For comparing float dimensions if needed elsewhere
 
     public function __construct(
         string $name, string $type,
         float $width, float $length, float $height,
-        float $weight, bool $stackable, bool $tiltable, int $qty
+        float $weight, bool $stackable, bool $tiltable, int $qty,
+        ?float $maxSupportWeightKgOverride = null // Added optional constructor param
     ) {
         $this->name = $name;
         $this->type = $type;

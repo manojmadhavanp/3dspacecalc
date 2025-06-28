@@ -182,28 +182,53 @@ class PlacementService {
                     $supportingSurfaceArea += $overlapWidth * $overlapLength;
                     $itemBelow = $placedItem->originalItemRef; // Get original item for properties
 
-                    if ($itemBelow === null) { /* error_log("Original item ref missing in PlacedItem"); */ return false; }
+                    if ($itemBelow === null) {
+                        error_log("Stacking check: Original item ref missing in a PlacedItem object.");
+                        return ['allowed' => false, 'reason' => "Stacking failed: Internal error, supporting item data missing."];
+                    }
 
-                    if (!$itemBelow->stackable && ItemTypeConfig::getMaxSupportWeightKg($itemBelow->type) < self::EPSILON) {
-                        $allSupportingItemsStackable = false; break;
+                    // Determine effective max support weight for itemBelow
+                    $effectiveMaxSupportKgItemBelow = $itemBelow->maxSupportWeightKgOverride;
+                    if ($effectiveMaxSupportKgItemBelow === null || $effectiveMaxSupportKgItemBelow < 0) { // Check if override is set and positive
+                        $effectiveMaxSupportKgItemBelow = ItemTypeConfig::getMaxSupportWeightKg($itemBelow->type);
                     }
+
+                    // Rule 1: Item below must be 'stackable' by its own property OR its effective max support weight must be positive.
+                    if (!$itemBelow->stackable && $effectiveMaxSupportKgItemBelow < self::EPSILON) {
+                        return ['allowed' => false, 'reason' => "Stacking failed: Item below '{$itemBelow->name}' (type '{$itemBelow->type}') is not stackable and its type/override provides no support."];
+                    }
+
+                    // Rule 2: Heavier-on-lighter check: $itemToPlace weight <= $itemBelow weight
                     if ($itemToPlace->weight > ($itemBelow->weight + self::EPSILON)) {
-                         $allSupportingItemsStackable = false; break; // Cannot place heavier on lighter
+                        return ['allowed' => false, 'reason' => "Stacking failed: Item '{$itemToPlace->name}' ({$itemToPlace->weight}kg) is heavier than item below '{$itemBelow->name}' ({$itemBelow->weight}kg)."];
                     }
-                    $minMaxSupportWeightOfSupportingItems = min($minMaxSupportWeightOfSupportingItems, ItemTypeConfig::getMaxSupportWeightKg($itemBelow->type));
-                    $minSupportingItemWeight = min($minSupportingItemWeight, $itemBelow->weight);
+
+                    // Rule 3: Max support weight check (using effective value): $itemToPlace weight <= $effectiveMaxSupportKgItemBelow
+                    if ($effectiveMaxSupportKgItemBelow > self::EPSILON && $itemToPlace->weight > ($effectiveMaxSupportKgItemBelow + self::EPSILON)) {
+                        return ['allowed' => false, 'reason' => "Stacking failed: Item '{$itemToPlace->name}' ({$itemToPlace->weight}kg) exceeds max support weight ({$effectiveMaxSupportKgItemBelow}kg) of item below '{$itemBelow->name}'."];
+                    }
+
+                    // If all rules passed for this supporting $pItem, this segment of support is valid.
+                    // No need to update $allSupportingItemsStackable here as we return early on failure.
                 }
+            }
+        } // End foreach placedItemsList
+
+        // After checking all potential supporters, evaluate overall support.
+        // Rule 4: Sufficient Footprint Support & Presence of Valid Support
+        if ($targetAbsZ > self::EPSILON) { // Only apply if not on the floor
+            if (!$foundAnySupport) { // This flag needs to be set if any overlap was found
+                return ['allowed' => false, 'reason' => "Stacking failed: No supporting item found directly below at Z={$targetAbsZ}. Attempting to place in mid-air."];
+            }
+            // If foundAnySupport is true, it means all overlapping items below passed their individual checks.
+            // Now check the total area.
+            $minRequiredSupportArea = $newItemBaseArea * 0.75; // Example: 75%
+            if ($totalActualSupportingArea < ($minRequiredSupportArea - self::EPSILON)) {
+                return ['allowed' => false, 'reason' => "Stacking failed: Insufficient support area. Found: ".round($totalActualSupportingArea,1).", Requires: ".round($minRequiredSupportArea,1)." (75% of item base)."];
             }
         }
 
-        if ($supportingSurfaceArea < ($itemToPlaceOrientedDims['width'] * $itemToPlaceOrientedDims['length'] * 0.75 - self::EPSILON) ) { // e.g. needs 75% base support
-            return false; // Not enough support area
-        }
-        if (!$allSupportingItemsStackable) return false;
-        if ($itemToPlace->weight > ($minMaxSupportWeightOfSupportingItems + self::EPSILON)) return false;
-        // Implicitly, if $itemToPlace->weight > $minSupportingItemWeight, it was caught by allSupportingItemsStackable logic.
-
-        return true;
+        return ['allowed' => true, 'reason' => 'Stacking permitted.'];
     }
 
 

@@ -40,18 +40,27 @@ class SortItemsService {
         foreach ($rawItemsData as $itemData) {
             $requiredKeys = ['name', 'type', 'width', 'length', 'height', 'weight', 'stackable', 'tiltable', 'qty'];
             foreach($requiredKeys as $reqKey) { if(!isset($itemData[$reqKey])) throw new \InvalidArgumentException("Missing key '$reqKey' in item data for item '{$itemData['name']}'."); }
-            if((int)$itemData['qty'] <=0) continue; // Skip items with zero or negative quantity
+            if((int)$itemData['qty'] <=0) continue;
 
-            $key = sprintf("%s-%s-%.2f-%.2f-%.2f-%.2f-%d-%d",
-                $itemData['name'], $itemData['type'], (float)$itemData['width'], (float)$itemData['length'],
-                (float)$itemData['height'], (float)$itemData['weight'], (bool)$itemData['stackable'], (bool)$itemData['tiltable']
+            // Include maxSupportOverrideKg in the grouping key if present, using -1 as a sentinel for null/not set
+            $maxSupportOverrideForGrouping = isset($itemData['maxSupportOverrideKg']) ? (float)$itemData['maxSupportOverrideKg'] : -1.0;
+            $key = sprintf("%s-%s-%.2f-%.2f-%.2f-%.2f-%d-%d-%.2f",
+                $itemData['name'], $itemData['type'],
+                (float)$itemData['width'], (float)$itemData['length'], (float)$itemData['height'],
+                (float)$itemData['weight'], (bool)$itemData['stackable'], (bool)$itemData['tiltable'],
+                $maxSupportOverrideForGrouping
             );
 
             if (!isset($groupedItemsMap[$key])) {
+                $maxSupportVal = isset($itemData['maxSupportOverrideKg']) ? (float)$itemData['maxSupportOverrideKg'] : null;
+                if ($maxSupportVal !== null && $maxSupportVal < 0) $maxSupportVal = null; // Treat negative override as not set
+
                 $groupedItemsMap[$key] = new Item(
-                    $itemData['name'], $itemData['type'], (float)$itemData['width'], (float)$itemData['length'],
-                    (float)$itemData['height'], (float)$itemData['weight'], (bool)$itemData['stackable'],
-                    (bool)$itemData['tiltable'], 0
+                    $itemData['name'], $itemData['type'],
+                    (float)$itemData['width'], (float)$itemData['length'], (float)$itemData['height'],
+                    (float)$itemData['weight'], (bool)$itemData['stackable'], (bool)$itemData['tiltable'],
+                    0, // Qty will be summed
+                    $maxSupportVal // Pass the override to the Item constructor
                 );
             }
             $groupedItemsMap[$key]->qty += (int)$itemData['qty'];
