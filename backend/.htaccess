@@ -1,0 +1,78 @@
+```apache
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Set the base for API requests if your backend folder is not the webroot for the API URL.
+  # If http://xactload.hostboxindia.com/ points to a folder *above* /backend,
+  # and your API is xactload.hostboxindia.com/backend/api/v1/*, then RewriteBase might be /backend/
+  # However, if xactload.hostboxindia.com/api/v1/ directly maps to the backend/index.php context
+  # (e.g. backend/ is the root or aliased to /api/v1), then RewriteBase might not be needed or is just /.
+  #
+  # Let's assume your web server is configured such that requests to
+  # xactload.hostboxindia.com/api/v1/... are already being handled by files within the /backend directory,
+  # or that /backend/ itself is effectively /api/v1/.
+  # If your backend folder is accessed like xactload.hostboxindia.com/backend/ and then you want
+  # .../backend/api/v1/* to go to index.php, then RewriteBase /backend/ would be appropriate.
+
+  # For now, let's assume the routing primarily happens based on the path *after* the domain.
+  # The PHP router will handle the /api/v1 part.
+
+  # Redirect Trailing Slashes If Not A Folder...
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.*)/$ /$1 [L,R=301] # Or handle in PHP router
+
+  # Handle API requests by redirecting to index.php
+  # Do not rewrite if the request is for an actual existing file or directory
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  # Rewrite all other requests to index.php, appending the query string
+  RewriteRule ^(.*)$ index.php [L,QSA]
+</IfModule>
+
+# Optional: Deny access to specific files if needed
+# <Files ".env">
+#    Order allow,deny
+#    Deny from all
+# </Files>
+# <FilesMatch "\.(json)$">
+#  Require all denied
+# </FilesMatch>
+
+# PHP settings (if needed and allowed by server config)
+# php_flag display_errors On
+# php_value error_reporting E_ALL
+```
+
+**Explanation:**
+
+1.  **`<IfModule mod_rewrite.c>`:** Ensures these rules only apply if `mod_rewrite` is available.
+2.  **`RewriteEngine On`:** Enables the rewrite engine.
+3.  **Trailing Slash Redirect (Optional but good practice):**
+    *   `RewriteCond %{REQUEST_FILENAME} !-d`: Condition: if the request is NOT for an existing directory.
+    *   `RewriteRule ^(.*)/$ /$1 [L,R=301]`: Rule: if the URL ends with a slash, redirect (301 permanent) to the same URL without the slash. This helps prevent duplicate content issues. The `L` flag means stop processing further rules.
+4.  **Main API Rewrite Rule:**
+    *   `RewriteCond %{REQUEST_FILENAME} !-f`: Condition: if the request is NOT for an existing file.
+    *   `RewriteCond %{REQUEST_FILENAME} !-d`: Condition: if the request is NOT for an existing directory.
+    *   `RewriteRule ^(.*)$ index.php [L,QSA]`:
+        *   Rule: For any other request (`^(.*)$`), rewrite it to `index.php`.
+        *   The `(.*)` captures the requested path. While this `.htaccess` doesn't explicitly pass it as a query string parameter like `index.php?url=$1`, PHP's `$_SERVER['REQUEST_URI']` (or `$_SERVER['PATH_INFO']` depending on server config) in `index.php` will contain the original requested path, which our PHP router will then parse.
+        *   `L`: Last rule, stop processing.
+        *   `QSA`: Query String Append. Ensures that if the original request had a query string (e.g., `/auth/reset?token=123`), it's preserved and passed to `index.php`.
+
+5.  **Security (Optional but Recommended):**
+    *   The commented-out sections show how you might deny direct web access to sensitive files like `.env` or all `.json` files if they are within the web-accessible `backend` directory. It's generally better if config files and `.env` are stored *outside* the web root if possible, but if not, `.htaccess` can help protect them.
+
+**Important Server Configuration Note:**
+For this `.htaccess` to work correctly, the Apache configuration for the site (e.g., in `<Directory>` block for your `backend` folder or its parent) must have `AllowOverride All` or at least `AllowOverride FileInfo Options` (or similar that allows `RewriteRule`).
+
+This `.htaccess` file provides a standard way to route all non-file/non-directory requests within the `backend` directory to `index.php`, which is the foundation for a front controller pattern.The `.htaccess` file for the `backend/` directory has been conceptually created.
+
+Its purpose is to ensure that all requests to the API (that don't point to an existing file or directory) are internally rewritten to `backend/index.php`. The `index.php` script will then use the `$_SERVER['REQUEST_URI']` to parse the path and route the request to the appropriate controller and action.
+
+Key directives used:
+*   `RewriteEngine On`
+*   Conditions to not rewrite if the request is for an actual file (`!-f`) or directory (`!-d`).
+*   A `RewriteRule ^(.*)$ index.php [L,QSA]` to send all other requests to `index.php`, preserving any query string (`QSA`).
+*   Optional (commented out) rules for denying access to sensitive files like `.env` or `.json` files if they reside within the web-accessible directory.
+
+This completes the first step of the "Consolidate API Routing and Entry Point" phase. The next step is to refine `backend/index.php`.

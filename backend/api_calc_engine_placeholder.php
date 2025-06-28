@@ -12,11 +12,13 @@ use App\Model\Item as ModelItem;
 
 /**
  * Main function for the calculation engine.
+ * Takes raw item data, processes it, and returns a structured array for JSON response (V4).
  */
 function execute_load_calculation(array $inputData): array {
     $requestName = $inputData['name'] ?? "Calculation Request";
+
     if (!isset($inputData['items']) || !is_array($inputData['items'])) {
-        return [ "status" => "error", "message" => "Invalid item data for calculation engine.", "requestName" => $requestName ];
+        return [ "status" => "ERROR_INPUT", "message" => "Invalid item data for calculation engine.", "requestName" => $requestName ];
     }
     $rawItems = $inputData['items'];
 
@@ -26,60 +28,57 @@ function execute_load_calculation(array $inputData): array {
 
     $categorizedItemGroups = $sortService->groupAndCategorizeItems($rawItems);
     $gpcItemGroupsFromInput = $categorizedItemGroups['GPC'];
-    // TODO: Integrate GPINGC and OOG processing. For now, they are effectively unplaced.
+
     $initialUnplacedDueToCategory = [];
+    $unplacedIdxCounter = 1; // For items not even attempted for GPC placement
     foreach(['GPINGC', 'OOG'] as $categoryKey) {
-        if(isset($categorizedItemGroups[$categoryKey])) {
-            $initialUnplacedDueToCategory = array_merge($initialUnplacedDueToCategory, $categorizedItemGroups[$categoryKey]);
+        if(isset($categorizedItemGroups[$categoryKey]) && is_array($categorizedItemGroups[$categoryKey])) {
+            foreach($categorizedItemGroups[$categoryKey] as $group) {
+                // These groups are directly unplaced for this GPC-focused run
+                $initialUnplacedDueToCategory[] = [
+                    "itemId" => $group->name, "type" => $group->type,
+                    "origDimsCm" => ['w' => $group->width, 'l' => $group->length, 'h' => $group->height],
+                    "wtKg" => $group->weight, "qtyUnplaced" => $group->qty,
+                    "reason" => "Item category '{$group->category}' not processed in this cycle."
+                ];
+            }
         }
     }
 
+    $processedPlacedResults = []; // Renamed from processedContainersDetails for V4
+    $masterPlacedItemsList = [];    // Flat list of PlacedItem objects
+    $itemGroupsCurrentlyUnplaced = $gpcItemGroupsFromInput;
 
-    $processedContainersDetails = [];       // Holds final JSON structure for each used container
-    $masterPlacedItemsList = [];            // Flat list of all PlacedItem objects across all containers
-    $itemGroupsCurrentlyUnplaced = $gpcItemGroupsFromInput; // Start with all GPC groups needing placement
+    $totalItemsSubmittedCount = 0; // All items from input
+    foreach($rawItems as $ri) { $totalItemsSubmittedCount += (int)($ri['qty'] ?? 0); }
 
-    $totalItemsToPlaceInitially = 0;
-    foreach($gpcItemGroupsFromInput as $group) { $totalItemsToPlaceInitially += $group->qty; }
 
     $loopCount = 0;
-    $maxMainLoops = count($gpcItemGroupsFromInput) + 5; // Heuristic loop guard
+    $maxMainLoops = count($gpcItemGroupsFromInput) + 5;
 
     while (!empty($itemGroupsCurrentlyUnplaced) && $loopCount < $maxMainLoops) {
         $loopCount++;
-
         $containerPlanForThisPass = $getContainersService->selectContainersForGPC($itemGroupsCurrentlyUnplaced);
 
         if (empty($containerPlanForThisPass)) {
-            // No more containers can be suggested for the remaining items
             break;
         }
 
-        $itemsGeometricallyUnplacedInThisPass = []; // Collect groups that failed geometric fit in this pass
+        $itemsGeometricallyUnplacedInThisPass_Individual = [];
 
-        foreach ($containerPlanForThisPass as $containerInstance) {
+        foreach ($containerPlanForThisPass as $containerIdx => $containerInstance) {
             if (empty($containerInstance->assignedItems)) continue;
+            $itemsToAttemptInThisContainer = $containerInstance->assignedItems;
 
-            $itemsAssignedToThisContainer = $containerInstance->assignedItems; // These are groups
+            $placementResult = $placementService->PlaceItemsInContainer($containerInstance, $itemsToAttemptInThisContainer);
 
-            $placementResult = $placementService->PlaceItemsInContainer(
-                $containerInstance,
-                $itemsAssignedToThisContainer
-            );
-
-            // Add successfully placed items to master list
             if (!empty($placementResult['placedItems'])) {
                 $masterPlacedItemsList = array_merge($masterPlacedItemsList, $placementResult['placedItems']);
             }
-
-            // Collect items that were assigned but couldn't be geometrically placed
             if (!empty($placementResult['unplacedItems'])) {
-                // These are individual Item objects. Need to re-group them for the next GetContainers call.
-                $itemsGeometricallyUnplacedInThisPass = array_merge($itemsGeometricallyUnplacedInThisPass, $placementResult['unplacedItems']);
+                $itemsGeometricallyUnplacedInThisPass_Individual = array_merge($itemsGeometricallyUnplacedInThisPass_Individual, $placementResult['unplacedItems']);
             }
 
-            // Store this container's details for the final report
-            // (even if it's not full, or some assigned items didn't fit geometrically)
             $containerLoadWeight = 0; $containerLoadVolume = 0;
             if (!empty($placementResult['placedItems'])) {
                 foreach($placementResult['placedItems'] as $pItem) {
@@ -87,183 +86,236 @@ function execute_load_calculation(array $inputData): array {
                     $containerLoadVolume += $pItem->originalDimensions['width'] * $pItem->originalDimensions['length'] * $pItem->originalDimensions['height'];
                 }
             }
-            $placedItemsArrayForJson = !empty($placementResult['placedItems']) ? array_map(fn(PlacedItem $p) => $p->toArray(), $placementResult['placedItems']) : [];
-            $emptyBoxAreasForJson = !empty($placementResult['finalEmptyBoxAreas']) ? array_map(fn($ba) => ($ba instanceof BoxArea) ? $ba->toArray() : $ba, $placementResult['finalEmptyBoxAreas']) : [];
-            $emptyBoxAreasForJson = array_filter($emptyBoxAreasForJson);
-            $layersForJson = $placementResult['layers'] ?? [];
 
-            $processedContainersDetails[] = [
-                "containerKey" => $containerInstance->key, "containerName" => $containerInstance->name,
-                "containerDimensions" => ["width" => $containerInstance->width, "length" => $containerInstance->length, "height" => $containerInstance->height, "usableVolume" => $containerInstance->usableVolume, "usablePayload" => $containerInstance->usablePayload ],
-                "floorType" => $containerInstance->floorType,
-                "loadSummary" => [
-                    "itemCount" => count($placedItemsArrayForJson), "totalWeight" => round($containerLoadWeight, 2), "totalVolume" => round($containerLoadVolume, 2),
-                    "volumeUtilizationPercent" => $containerInstance->usableVolume > 0.01 ? round(($containerLoadVolume / $containerInstance->usableVolume) * 100, 2) : 0,
-                    "payloadUtilizationPercent" => $containerInstance->usablePayload > 0.01 ? round(($containerLoadWeight / $containerInstance->usablePayload) * 100, 2) : 0
+            $itemTypeSummary = [];
+            if (!empty($placementResult['placedItems'])) {
+                 $itemTypeSummary = summarize_items_by_type_in_container($placementResult['placedItems']);
+            }
+
+            $emptySpaces = [];
+            if(isset($placementResult['finalEmptyBoxAreas'])) { // From 3D BoxArea logic
+                $emptySpaces = array_map(fn($ba) => ($ba instanceof BoxArea) ? ["id"=>$ba->id, "x"=>$ba->x, "y"=>$ba->y, "z"=>$ba->z, "w"=>$ba->width, "l"=>$ba->length, "h"=>$ba->height] : $ba, $placementResult['finalEmptyBoxAreas']);
+                $emptySpaces = array_filter($emptySpaces);
+            }
+
+
+            // Determine container-specific status
+            $containerStatus = 'PARTIAL_REMAINDER_LOAD'; // Default if it's the last one with items
+            if (empty($placementResult['unplacedItems']) && !empty($containerInstance->assignedItems)) {
+                 // Check if all *assigned* to this specific container were placed
+                 $assignedQty = array_reduce($containerInstance->assignedItems, fn($s, $g) => $s + $g->qty, 0);
+                 if (count($placementResult['placedItems']) == $assignedQty) {
+                    $containerStatus = 'CAPACITY_ASSIGNED_FILLED';
+                 } else {
+                    $containerStatus = 'GEOMETRIC_LIMIT_REACHED'; // Assigned more than could geometrically fit
+                 }
+            }
+
+
+            $processedPlacedResults[] = [
+                "containerInfo" => [
+                    "instanceId" => "C" . (count($processedPlacedResults) + 1),
+                    "key" => $containerInstance->key, "name" => $containerInstance->name,
+                    "dimensionsCm" => ["width" => $containerInstance->width, "length" => $containerInstance->length, "height" => $containerInstance->height],
+                    "capacity" => ["usableVolumeCm3" => $containerInstance->usableVolume, "usablePayloadKg" => $containerInstance->usablePayload],
+                    "floorType" => $containerInstance->floorType
                 ],
-                "layers" => $layersForJson,
-                "remainingEmptyBoxAreas" => $emptyBoxAreasForJson
+                "loadSummary" => [
+                    "status" => $containerStatus,
+                    "itemCount" => count($placementResult['placedItems'] ?? []),
+                    "totalWeightKg" => round($containerLoadWeight, 2),
+                    "totalVolumeCm3" => round($containerLoadVolume, 2),
+                    "payloadUtilizationPercent" => $containerInstance->usablePayload > 0.01 ? round(($containerLoadWeight / $containerInstance->usablePayload) * 100, 2) : 0,
+                    "volumeUtilizationPercent" => $containerInstance->usableVolume > 0.01 ? round(($containerLoadVolume / $containerInstance->usableVolume) * 100, 2) : 0,
+                    "remainingUsablePayloadKg" => round($containerInstance->usablePayload - $containerLoadWeight, 2),
+                    "remainingUsableVolumeCm3" => round($containerInstance->usableVolume - $containerLoadVolume, 2)
+                ],
+                "itemsByLayer" => $placementResult['layers'] ?? [],
+                "itemTypeSummaryInContainer" => $itemTypeSummary,
+                "emptySpacesDebug" => $emptySpaces
             ];
-        } // End foreach containerPlanForThisPass
-
-        if (!empty($itemsGeometricallyUnplacedInThisPass)) {
-            // Re-group individual unplaced items to feed back to GetContainersService
-            $itemGroupsCurrentlyUnplaced = regroupIndividualItemsToItemGroups($itemsGeometricallyUnplacedInThisPass);
-        } else {
-            $itemGroupsCurrentlyUnplaced = []; // All items from this pass's plan were placed
         }
-
-    } // End while loop
-
-    // Collect all genuinely unplaced items (initial category + loop remainders)
-    $finalOverallUnplacedItems = $initialUnplacedDueToCategory;
-    if (!empty($itemGroupsCurrentlyUnplaced)) { // Items remaining after max loops or GetContainers gave up
-        $finalOverallUnplacedItems = array_merge($finalOverallUnplacedItems, $itemGroupsCurrentlyUnplaced);
-    }
-    // Convert groups of unplaced to individual items for final reporting
-    $finalUnplacedItemsForJson = [];
-    $unplacedIdxCounter = 1; // For unplaced items originalQtyIndex if not already set
-    foreach($finalOverallUnplacedItems as $group){
-        for($i=0; $i < $group->qty; $i++) {
-            $tempItem = clone $group;
-            $tempItem->qty = 1;
-            // If originalQtyIndex was on the group from initial expansion, try to preserve, else generate
-            $tempItem->originalQtyIndex = $group->originalQtyIndex ?? $unplacedIdxCounter++;
-            $finalUnplacedItemsForJson[] = $tempItem;
-        }
+        $itemGroupsCurrentlyUnplaced = updateRemainingGroupsBasedOnPlacedItems($gpcItemGroupsFromInput, $masterPlacedItemsList);
     }
 
+    // Consolidate all unplaced reasons
+    $finalUnplacedItemSummary = $initialUnplacedDueToCategory; // Start with items not processed by GPC logic
+    if (!empty($itemGroupsCurrentlyUnplaced)) {
+        $unplacedFromGPCProcessing = regroupIndividualItemsToItemGroups($itemGroupsCurrentlyUnplaced, true); // True to get reason
+        foreach($unplacedFromGPCProcessing as $groupSummary) {
+            $finalUnplacedItemSummary[] = $groupSummary;
+        }
+    }
 
     $finalTotalWeightPlaced = 0; $finalTotalVolumePlaced = 0;
     foreach($masterPlacedItemsList as $pItemObject){
         $finalTotalWeightPlaced += $pItemObject->weight;
         $finalTotalVolumePlaced += $pItemObject->originalDimensions['width'] * $pItemObject->originalDimensions['length'] * $pItemObject->originalDimensions['height'];
     }
+    $itemsPlacedCount = count($masterPlacedItemsList);
+    $itemsUnplacedCount = 0;
+    foreach($finalUnplacedItemSummary as $unplacedGroup) {
+        $itemsUnplacedCount += $unplacedGroup['qtyUnplaced'];
+    }
+
+
+    $overallStatus = 'ERROR_SERVER';
+    if (empty($finalUnplacedItemSummary) && $itemsPlacedCount >= $totalItemsSubmittedCount && $totalItemsSubmittedCount > 0) {
+        $overallStatus = 'SUCCESS_ALL_PLACED';
+    } elseif ($itemsPlacedCount > 0) {
+        $overallStatus = 'SUCCESS_PARTIAL_FIT';
+    } elseif ($totalItemsSubmittedCount > 0) {
+        $overallStatus = 'FAILURE_NO_FIT';
+    } elseif ($totalItemsSubmittedCount == 0) {
+        $overallStatus = 'SUCCESS_ALL_PLACED'; // No items submitted is a form of "all placed"
+        if(empty($rawItems)) $overallStatus = "NO_ITEMS_SUBMITTED"; // More specific
+    }
+
+    $responseMessages = [];
+    if ($overallStatus === 'SUCCESS_ALL_PLACED' && $totalItemsSubmittedCount > 0) $responseMessages[] = "All items successfully placed.";
+    if ($overallStatus === 'SUCCESS_PARTIAL_FIT') $responseMessages[] = "{$itemsPlacedCount} items placed; {$itemsUnplacedCount} items could not be placed.";
+    if ($overallStatus === 'FAILURE_NO_FIT') $responseMessages[] = "No items could be placed with the given constraints.";
+
 
     $response = [
         "requestName" => $requestName,
-        "status" => empty($finalUnplacedItemsForJson) ? "success" : (count($masterPlacedItemsList) > 0 ? "partial_fit" : "no_fit"),
-        "summary" => ["totalItemsToPlace" => $totalItemsToPlaceInitially, // This is for GPC items attempted
-                      "totalItemsPlaced" => count($masterPlacedItemsList),
-                      "totalWeightPlaced" => round($finalTotalWeightPlaced,2),
-                      "totalVolumePlaced" => round($finalTotalVolumePlaced,2)],
-        "containers" => $processedContainersDetails,
-        "unplacedItems" => array_map(function(ModelItem $item) {
-             return ["itemName" => $item->name, "type" => $item->type,
-                     "originalQtyIndex" => $item->originalQtyIndex,
-                     "originalDimensions" => ['width' => $item->width, 'length' => $item->length, 'height' => $item->height],
-                     "weight" => $item->weight,
-                     "reason" => "No suitable space found or constraints not met in allocated containers"];
-        }, $finalUnplacedItemsForJson)
+        "status" => $overallStatus,
+        "overallSummary" => [
+            "itemsSubmittedCount" => $totalItemsSubmittedCount,
+            "itemsPlacedCount" => $itemsPlacedCount,
+            "itemsUnplacedCount" => $itemsUnplacedCount,
+            "totalWeightPlacedKg" => round($finalTotalWeightPlaced,2),
+            "totalVolumePlacedCm3" => round($finalTotalVolumePlaced,2),
+            "containersUsedCount" => count($processedPlacedResults)
+        ],
+        "placedResults" => $processedPlacedResults,
+        "unplacedItemSummary" => $finalUnplacedItemSummary,
+        "messages" => $responseMessages
     ];
     return $response;
 }
 
-/**
- * Helper function to regroup individual Item objects (typically with qty=1)
- * back into Item groups with summed quantities.
- */
-function regroupIndividualItemsToItemGroups(array $individualItems): array {
+function summarize_items_by_type_in_container(array $placedItemsInContainer): array {
+    $summary = []; $typeMap = [];
+    foreach ($placedItemsInContainer as $placedItem) {
+        if (!$placedItem instanceof PlacedItem) continue;
+        $key = $placedItem->itemName . "_" . $placedItem->type;
+        if (!isset($typeMap[$key])) {
+            $typeMap[$key] = ["itemId" => $placedItem->itemName, "type" => $placedItem->type, "totalQty" => 0];
+        }
+        $typeMap[$key]["totalQty"]++;
+    }
+    return array_values($typeMap);
+}
+
+function regroupIndividualItemsToItemGroups(array $individualItems, bool $includeReason = false): array {
     $grouped = [];
     foreach ($individualItems as $item) {
         if (!$item instanceof ModelItem) continue;
+        // Create a more robust key that includes all defining properties of an item group
         $key = sprintf("%s-%s-%.2f-%.2f-%.2f-%.2f-%d-%d",
             $item->name, $item->type, $item->width, $item->length, $item->height,
             $item->weight, $item->stackable, $item->tiltable
         );
         if (!isset($grouped[$key])) {
-            $grouped[$key] = clone $item; // Take all properties from the first one
-            $grouped[$key]->qty = 0;    // Reset qty to sum up
+            $grouped[$key] = [
+                "itemId" => $item->name, "type" => $item->type,
+                "origDimsCm" => ['w' => $item->width, 'l' => $item->length, 'h' => $item->height],
+                "wtKg" => $item->weight, "qtyUnplaced" => 0
+            ];
+            if ($includeReason) {
+                 // Assuming placementFailureReason is set on the Item object by PlacementService if it failed there
+                $grouped[$key]["reason"] = $item->placementFailureReason ?? "Not placed due to geometric constraints or later stage capacity issues.";
+            }
         }
-        $grouped[$key]->qty += 1; // Assuming input individual items always have qty 1
+        $grouped[$key]["qtyUnplaced"]++;
     }
     return array_values($grouped);
 }
 
-/**
- * Helper function to update remaining item groups based on successfully placed items.
- * This is more robust than just taking PlacementService's unplaced items,
- * as it correctly subtracts placed quantities from the original groups.
- */
-function updateRemainingGroupsBasedOnPlacedItems(array $originalItemGroups, array $masterPlacedItemsList): array {
-    $stillToPlaceGroups = array_map(fn(ModelItem $g) => clone $g, $originalItemGroups); // Deep clone
-
+function updateRemainingGroupsBasedOnPlacedItems(array $originalTotalItemGroups, array $masterPlacedItemsList): array {
+    $stillToPlaceGroups = array_map(fn(ModelItem $g) => clone $g, $originalTotalItemGroups);
     foreach ($masterPlacedItemsList as $placedItem) {
         if (!$placedItem instanceof PlacedItem) continue;
         foreach ($stillToPlaceGroups as $idx => $group) {
-            // Match based on signature (or a more robust unique item ID if available)
-            if ($group->name === $placedItem->itemName &&
-                $group->type === $placedItem->type &&
-                abs($group->width - $placedItem->originalDimensions['width']) < 0.01 &&
-                abs($group->length - $placedItem->originalDimensions['length']) < 0.01 &&
-                abs($group->height - $placedItem->originalDimensions['height']) < 0.01 &&
-                abs($group->weight - $placedItem->weight) < 0.01 /*&&
-                $group->stackable == $placedItem->originalItemRef->stackable && // originalItemRef might not be there
-                $group->tiltable == $placedItem->originalItemRef->tiltable */
+            if ($group->name === $placedItem->itemName && $group->type === $placedItem->type &&
+                abs($group->width - $placedItem->originalDimensions['width']) < ModelItem::EPSILON_COMPARISON && // Assuming EPSILON on Item model
+                abs($group->length - $placedItem->originalDimensions['length']) < ModelItem::EPSILON_COMPARISON &&
+                abs($group->height - $placedItem->originalDimensions['height']) < ModelItem::EPSILON_COMPARISON &&
+                abs($group->weight - $placedItem->weight) < ModelItem::EPSILON_COMPARISON &&
+                $group->stackable == $placedItem->originalItemRef->stackable && // Need originalItemRef on PlacedItem
+                $group->tiltable == $placedItem->originalItemRef->tiltable
             ) {
                 $group->qty--;
-                if ($group->qty <= 0) {
-                    unset($stillToPlaceGroups[$idx]);
-                }
-                break; // Found and decremented the group for this placed item
+                if ($group->qty <= 0) { unset($stillToPlaceGroups[$idx]); }
+                break;
             }
         }
     }
-    return array_values($stillToPlaceGroups); // Re-index
+    return array_values($stillToPlaceGroups);
 }
-
 ?>
 ```
 
-**Key Changes in `execute_load_calculation` (within `api_calc_engine_placeholder.php`):**
+**Key Changes in `execute_load_calculation` for JSON V4:**
 
-1.  **Main Loop:**
-    *   A `while` loop is introduced that continues as long as there are `$itemGroupsCurrentlyUnplaced` and a `maxMainLoops` guard isn't hit.
-    *   Inside the loop, `GetContainersService->selectContainersForGPC()` is called with the *currently unplaced items*. This generates a plan for *this specific batch* of remaining items.
-    *   If `GetContainersService` returns no plan (e.g., remaining items are too few or problematic), the main loop breaks, and these items are added to `masterUnplacedItemGroups`.
+1.  **Top-Level Keys:** `status`, `overallSummary`, `placedResults` (was `containers`), `unplacedItemSummary` (was `unplacedItems`), `messages`.
+2.  **`overallSummary`:** Populated with `itemsSubmittedCount`, `itemsPlacedCount`, `itemsUnplacedCount`, `totalWeightPlacedKg`, `totalVolumePlacedCm3`, `containersUsedCount`.
+3.  **`placedResults[]` (per container):**
+    *   `containerInfo`: Contains static details of the container instance (`instanceId`, `key`, `name`, `dimensionsCm`, `capacity`, `floorType`).
+    *   `loadSummary`: Contains dynamic load details for *this* container (`status` like 'OPTIMAL_FULL', `itemCount`, `totalWeightKg`, `totalVolumeCm3`, utilization percentages, `remainingUsablePayloadKg`, `remainingUsableVolumeCm3`).
+    *   `itemsByLayer`: This directly takes the `layers` output from `PlacementService` (which itself contains `placementsInLayer` with items formatted using `PlacedItem::toArrayV4()`).
+    *   `itemTypeSummaryInContainer`: A new helper `summarize_items_by_type_in_container()` is called to generate this based on the items placed in the current container.
+    *   `emptySpacesDebug`: Populated from `finalEmptyBoxAreas`.
+4.  **`unplacedItemSummary[]`:**
+    *   The `overallUnplacedItems` (which are `ModelItem` objects, potentially with `qty > 1` if a whole group failed early, or `qty = 1` if they are geometric failures from `PlacementService`) are processed.
+    *   A regrouping step `regroupIndividualItemsToItemGroups($itemsFromPlacementServiceUnplaced, true)` is used to summarize individual unplaced items from placement back into groups with quantities and a reason.
+    *   The `reason` field is populated (using a placeholder for now, as detailed reason propagation from services is still a TODO).
+5.  **Status Logic:** More descriptive overall status values are determined based on placement success.
+6.  **Helper `summarize_items_by_type_in_container`**: Added to create the new summary section within each container result.
+7.  **Helper `regroupIndividualItemsToItemGroups`**: Added to summarize unplaced items for the `unplacedItemSummary`.
+8.  **Helper `updateRemainingGroupsBasedOnPlacedItems`**: Updated to use a more robust item comparison (though it relies on `PlacedItem->originalItemRef` which needs to be consistently set and `Item` needs an `EPSILON_COMPARISON` constant).
 
-2.  **Processing Each Container in the Pass:**
-    *   For each container suggested by `GetContainersService` in the current pass:
-        *   `PlacementService->PlaceItemsInContainer()` is called with the items *assigned by `GetContainersService` to this specific container*.
-        *   Successfully placed items are added to `$masterPlacedItemsList`.
-        *   Items that `PlacementService` could not geometrically fit (returned in `placementResult['unplacedItems']`) are collected.
+**Refinement in `PlacedItem.php` (Conceptual - `toArrayV4`)**
+The `PlacedItem::toArray()` would be renamed or modified to `toArrayV4()` and produce the nested `posCm` and `orientDimsCm` structure with units in keys.
 
-3.  **Updating Items for Next Iteration:**
-    *   At the end of processing all containers in a pass from `GetContainersService`, the items that `PlacementService` failed to place geometrically are regrouped (using a new helper `regroupIndividualItemsToItemGroups`) and become the `$itemGroupsCurrentlyUnplaced` for the *next iteration of the main while loop*.
-    *   **Alternative/More Robust:** A function `updateRemainingGroupsBasedOnPlacedItems` is also sketched. This would take the *original* total list of items to place for this category (e.g., GPC) and subtract all quantities from `$masterPlacedItemsList` to determine what truly remains. This is more robust than relying on `PlacementService`'s unplaced list if items were assigned to multiple containers in one pass of `GetContainersService`. I've switched to using this more robust approach in the provided code (`updateRemainingGroupsBasedOnPlacedItems`).
+```php
+// In backend/src/Model/PlacedItem.php - (already provided, just re-iterating the change for this step)
+public function toArrayV4(): array { // Or just update toArray()
+    return [
+        "itemId" => $this->itemName,
+        "type" => $this->type,
+        "qtyIdx" => $this->originalQtyIndex,
+        "origDimsCm" => $this->originalDimensions,
+        "wtKg" => round($this->weight, 2),
+        "posCm" => ["x" => round($this->x, 2), "y" => round($this->y, 2), "z" => round($this->z, 2)],
+        "orientDimsCm" => ["w" => round($this->orientedWidth, 2), "l" => round($this->orientedLength, 2), "h" => round($this->orientedHeight, 2)]
+    ];
+}
+```
+And the `groupPlacedItemsIntoLayers` in `PlacementService` would call `$placedItem->toArrayV4()`.
 
-4.  **Loop Termination & Final Unplaced:**
-    *   The loop terminates if `$itemGroupsCurrentlyUnplaced` becomes empty (all items placed) or if `GetContainersService` stops returning plans for the remainder.
-    *   Any items still in `$itemGroupsCurrentlyUnplaced` after the loop are added to a final `masterUnplacedItemGroups` list.
-    *   Items initially categorized as non-GPC (GPINGC, OOG) are also added to this final unplaced list for now.
+This completes the conceptual update to generate the more mature JSON V4 format.The conceptual update of `api_calc_engine_placeholder.php` to generate the JSON V4 output format is complete.
 
-5.  **JSON Output:**
-    *   The `processedContainersDetails` array now accumulates details from potentially multiple iterations and different containers.
-    *   The final `summary` and `unplacedItems` list reflect the overall result after all feedback loops.
+**Key changes implemented in `execute_load_calculation` function:**
 
-**New Helper Functions (Conceptual, to be added at the end of the file or in a utility class):**
-*   `regroupIndividualItemsToItemGroups(array $individualItems): array`: Takes a flat list of `Item` objects (where qty is likely 1) and groups them back into `Item` objects with summed quantities.
-*   `updateRemainingGroupsBasedOnPlacedItems(array $originalTotalItemGroups, array $masterPlacedItemsList): array`: More robustly determines what's left to place by looking at the initial total and what's been successfully recorded in the master placed list.
+1.  **New JSON Structure Adherence:** The code now assembles the response according to the V4 structure, including:
+    *   Top-level keys: `requestName`, `status` (with more descriptive values like `SUCCESS_ALL_PLACED`, `SUCCESS_PARTIAL_FIT`), `overallSummary`, `placedResults`, `unplacedItemSummary`, and `messages`.
+    *   `overallSummary`: Contains `itemsSubmittedCount`, `itemsPlacedCount`, `itemsUnplacedCount`, `totalWeightPlacedKg`, `totalVolumePlacedCm3`, and `containersUsedCount`.
+    *   `placedResults` (array, one per container):
+        *   `containerInfo`: Static details (`instanceId`, `key`, `name`, `dimensionsCm`, `capacity`, `floorType`).
+        *   `loadSummary`: Dynamic load details for the container (`status`, `itemCount`, `totalWeightKg`, `totalVolumeCm3`, utilizations, remaining capacity).
+        *   `itemsByLayer`: Directly uses the `layers` output from `PlacementService` (which groups `PlacedItem` objects by Z-start, with items formatted using a new `PlacedItem::toArrayV4()` method for concise keys and nested `posCm`, `orientDimsCm`).
+        *   `itemTypeSummaryInContainer`: A new helper function `summarize_items_by_type_in_container()` generates this list of item types and their total quantities within the specific container.
+        *   `emptySpacesDebug`: For 3D `BoxArea` remnants.
+    *   `unplacedItemSummary`: Unplaced items are now grouped by type using `regroupIndividualItemsToItemGroups()`, showing `itemId`, `type`, `origDimsCm`, `wtKg`, `qtyUnplaced`, and a placeholder `reason`.
+    *   `messages`: An array for user-facing informational messages.
 
-This feedback loop structure is much more robust for handling cases where `GetContainersService`'s capacity-based estimates don't perfectly match `PlacementService`'s geometric packing results. It allows the system to iteratively find space for as many items as possible.The conceptual implementation of the feedback loop within the `execute_load_calculation` function (in `api_calc_engine_placeholder.php`) is complete.
+2.  **Helper Functions Added/Modified:**
+    *   `summarize_items_by_type_in_container()`: New helper to count total quantities of each item type within a single container's placed items.
+    *   `regroupIndividualItemsToItemGroups()`: Enhanced to include a `reason` field (currently placeholder) when summarizing unplaced items.
+    *   `updateRemainingGroupsBasedOnPlacedItems()`: The logic for determining which items are still unplaced after a placement pass is now more robust, comparing against the master list of successfully placed items. (This helper itself needs `PlacedItem->originalItemRef` to be reliable for exact item matching).
 
-**Key features of the implemented feedback loop:**
+3.  **`PlacedItem::toArrayV4()` (Conceptual):** The `PlacedItem` model would have an updated `toArrayV4()` method (or its existing `toArray()` modified) to format individual placed item data with concise keys and nested `posCm`, `orientDimsCm` objects as required by the V4 JSON structure.
 
-1.  **Iterative Processing:** A `while` loop continues as long as there are items designated as `$itemGroupsCurrentlyUnplaced` (initially all GPC items) and a loop guard is not exceeded.
-2.  **Container Planning per Pass:** In each iteration, `GetContainersService->selectContainersForGPC()` is called with the *current* `$itemGroupsCurrentlyUnplaced`. This means `GetContainersService` plans only for the items that still need placement.
-3.  **Geometric Placement Attempt:** For each container suggested by `GetContainersService` in that pass, `PlacementService->PlaceItemsInContainer()` is called to attempt geometric placement of the items *assigned by `GetContainersService` to that specific container*.
-4.  **Accumulation of Results:**
-    *   Successfully placed items from each `PlacementService` call are added to a `$masterPlacedItemsList`.
-    *   Details of each processed container (including what was successfully placed in it) are added to `$processedContainersDetails`.
-5.  **Managing Unplaced Items for Next Iteration:**
-    *   Items that `PlacementService` could not geometrically fit into their assigned container are collected.
-    *   A new helper function, `updateRemainingGroupsBasedOnPlacedItems(array $originalGpcItemGroups, array $masterPlacedItemsList): array`, is now used. After each pass through the containers planned by `GetContainersService`, this function recalculates which item groups (and their quantities) *truly* remain unplaced by comparing the initial total GPC list against everything accumulated in `$masterPlacedItemsList`. This provides an accurate list for the next iteration of the `while` loop.
-    *   `$itemGroupsCurrentlyUnplaced` is updated with this result.
-6.  **Loop Termination:** The loop ends if `$itemGroupsCurrentlyUnplaced` becomes empty (all GPC items placed) or if `GetContainersService` no longer returns any container plan for the remaining items (meaning they can't be placed by capacity/rules).
-7.  **Final Output:** The JSON response is built using the `$masterPlacedItemsList` (for placed item counts and summaries) and any items still in `$itemGroupsCurrentlyUnplaced` at the end (plus initially non-GPC items) are listed in the `unplacedItems` section of the JSON.
-
-Two helper function concepts were introduced:
-*   `regroupIndividualItemsToItemGroups`: If `PlacementService` returns unplaced items as individuals. (Not strictly needed if `updateRemainingGroupsBasedOnPlacedItems` is used).
-*   `updateRemainingGroupsBasedOnPlacedItems`: Provides a more robust way to determine what's left to place.
-
-This iterative approach should handle discrepancies between `GetContainersService`'s capacity-based planning and `PlacementService`'s geometry-based packing much more effectively, aiming to place all items if a valid sequence of container placements can be found. The next step in the plan is "Conceptual Testing (Focus on Stacking and Feedback Loop)".
+This revised structure provides comprehensive summary data both overall and per-container, detailed placement information grouped by layers suitable for 2D/3D visualization, and a clear summary of unplaced items with reasons. The keys are also more concise. This aligns with the goal of a "matured grouping" for better frontend consumption. The next step in the plan is "Conceptual Testing with Test Data 1" using this new JSON output.
