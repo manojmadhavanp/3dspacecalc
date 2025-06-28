@@ -126,12 +126,12 @@ class PlacementService {
                 $dims['height'] <= ($boxArea->height + self::EPSILON)) {
 
                 // Dimensional fit is OK. Now check stacking rules if not on floor.
-                if ($boxArea->z > self::EPSILON) {
+                if ($boxArea->z > self::EPSILON) { // Check only if not placing on the absolute floor (z=0)
                     if (!$this->canStackItemIn3DBoxArea(
                         $item,
                         $boxArea->x, // Target X for item (origin of BoxArea)
                         $boxArea->y, // Target Y for item
-                        $boxArea->z, // Target Z for item (base of item)
+                        $boxArea->z, // Target Z for item (base of item) - THIS IS THE Z OF THE BOXAREA
                         $dims,
                         $placedItemsList
                     )) {
