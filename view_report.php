@@ -466,46 +466,45 @@ if (!$report_id_from_url || !$token_from_url) {
 
                     placedItems.forEach(item => {
                         const od = item.placement?.orientedDimensions || item.originalDimensions;
-                        const p = item.placement;
+                        const p = item.placement; // Contains x, y, z, rotationY, orientedDimensions
+                        const od = p.orientedDimensions; // Use orientedDimensions directly
 
-                        if (od && od.length && od.height && od.width && p &&
-                            typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number') {
+                        if (od && typeof od.length === 'number' && typeof od.height === 'number' && typeof od.width === 'number' &&
+                            p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number') {
 
-                            const itemGeom = new THREE.BoxGeometry(od.length, od.height, od.width); // L, H, W -> X, Y, Z
+                            // Geometry is created with oriented dimensions
+                            // Three.js BoxGeometry: width, height, depth maps to X, Y, Z axes of the geometry itself
+                            // Our od.length -> X, od.height -> Y, od.width -> Z
+                            const itemGeom = new THREE.BoxGeometry(od.length, od.height, od.width);
+
                             const itemMat = new THREE.MeshStandardMaterial({
-                                color: item.color ? new THREE.Color(item.color) : new THREE.Color(0x00ff00), // Use item's color or default green
+                                color: item.color ? new THREE.Color(item.color) : new THREE.Color(0x00ff00),
                                 metalness: 0.3,
-                                roughness: 0.6
+                                roughness: 0.6,
+                                side: THREE.FrontSide // Default, explicitly set
                             });
                             const itemMesh = new THREE.Mesh(itemGeom, itemMat);
 
-                            // Item placement (p.x, p.y, p.z) is relative to container's internal origin (front-left-bottom corner).
-                            // We need to position the center of the itemMesh.
-                            // If p.x, p.y, p.z is the front-left-bottom of the item:
+                            // Apply rotation if specified (around the item's own Y-axis before positioning)
+                            if (typeof p.rotationY === 'number' && p.rotationY !== 0) {
+                                itemMesh.rotation.y = p.rotationY;
+                            }
+
+                            // Position the center of the itemMesh.
+                            // p.x, p.y, p.z are the coordinates of the item's reference corner (e.g., front-left-bottom)
+                            // within the container's internal space.
+                            // World X (Length axis): containerOriginX + item's X-offset + half of item's current X-extent (oriented length)
+                            // World Y (Height axis): containerOriginY + item's Z-offset (stacking height) + half of item's current Y-extent (oriented height)
+                            // World Z (Width/Depth axis): containerOriginZ + item's Y-offset + half of item's current Z-extent (oriented width)
                             itemMesh.position.set(
                                 containerOriginX + p.x + (od.length / 2),
-                                containerOriginY + p.z + (od.height / 2), // Map item's Z (height stacking) to world Y
-                                containerOriginZ + p.y + (od.width / 2)   // Map item's Y (depth in container) to world Z
+                                containerOriginY + p.z + (od.height / 2),
+                                containerOriginZ + p.y + (od.width / 2)
                             );
-                            // Self-correction: The 2D canvas mapping used item.placement.y for container's width axis.
-                            // The 3D data structure has item.placement.x, item.placement.y, item.placement.z.
-                            // Let's assume standard 3D orientation:
-                            // item.placement.x = position along container length (World X)
-                            // item.placement.y = position along container width (World Z)
-                            // item.placement.z = position along container height (World Y)
-                            // Container: Length (X), Height (Y), Width (Z)
-
-                            // Recalculate position based on this standard assumption:
-                             itemMesh.position.set(
-                                containerOriginX + p.x + (od.length / 2), // Item's X pos + half its length
-                                containerOriginY + p.z + (od.height / 2), // Item's Z (height) pos + half its height
-                                containerOriginZ + p.y + (od.width / 2)   // Item's Y pos + half its width
-                            );
-                            // The item's dimensions are: od.length (X), od.height (Y), od.width (Z)
 
                             scene.add(itemMesh);
                         } else {
-                            console.warn("Placed item missing dimensions or placement data:", item);
+                            console.warn("Placed item missing orientedDimensions or placement coordinates:", item);
                         }
                     });
                 } else {

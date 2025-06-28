@@ -132,28 +132,44 @@ for ($i = 0; $i < $item_count_to_visualize; $i++) {
         "originalQtyIndex" => $i + 1,
         "type" => $currentItem['type'] ?? "box", // Assuming a 'type' field or default to 'box'
         "originalDimensions" => [
-            "width" => $currentItem['width'] ?? 0,
-            "length" => $currentItem['length'] ?? 0,
-            "height" => $currentItem['height'] ?? 0
+            "width" => $currentItem['width'] ?? 30, // Default if not present
+            "length" => $currentItem['length'] ?? 40, // Default if not present
+            "height" => $currentItem['height'] ?? 20  // Default if not present
         ],
-        "weight" => $currentItem['weight'] ?? 0,
-        "placement" => [ // Simulate some basic placement
-            "x" => $i * (($currentItem['width'] ?? 30) + 5), // Simple stacking along X
-            "y" => 0,
-            "z" => 0,
-            "orientedWidth" => $currentItem['width'] ?? 0,    // Assuming no rotation for simulation
-            "orientedLength" => $currentItem['length'] ?? 0,
-            "orientedHeight" => $currentItem['height'] ?? 0,
-            // Simulate layer based on Z. If Z is 0, layer 1. If Z > 0 but less than some threshold, layer 2 etc.
-            // This is a very basic layer simulation. A real engine would determine exact layers.
-            "layer" => ($currentItem['height'] ?? 0) > 0 ? floor(($i * (($currentItem['height'] ?? 30))) / (($currentItem['height'] ?? 30) * 2)) + 1 : 1
-            // Example: if items are roughly same height, this puts 2 items per layer for first few.
-            // A more robust simulation: intval(round($placement_z / $typical_item_height)) + 1
-        ],
-        "color" => sprintf('#%02X%02X%02X', rand(100, 240), rand(100, 240), rand(100, 240)) // Random light-ish color
+        "weight" => $currentItem['weight'] ?? 0
     ];
-    // Accumulate volume for summary (very simplified, assumes cuboids and no rotation)
-    $itemVolume = ($currentItem['width'] ?? 0) * ($currentItem['length'] ?? 0) * ($currentItem['height'] ?? 0);
+
+    // Simulate rotation for every other item (for visualization testing)
+    $rotationY = 0;
+    $orientedLength = $placed_item_base["originalDimensions"]["length"];
+    $orientedWidth = $placed_item_base["originalDimensions"]["width"];
+    $orientedHeight = $placed_item_base["originalDimensions"]["height"];
+
+    if ($i % 2 == 1) { // Rotate every other item
+        $rotationY = M_PI / 2; // 90 degrees in radians
+        // Swap length and width for oriented dimensions
+        $orientedLength = $placed_item_base["originalDimensions"]["width"];
+        $orientedWidth = $placed_item_base["originalDimensions"]["length"];
+    }
+
+    $placed_item_base["placement"] = [
+        "x" => $i * (($currentItem['width'] ?? 30) + 10), // Simple stacking along X, increased spacing
+        "y" => 0, // On the floor of the container
+        "z" => 0, // At the 'bottom' of the layer (for 3D height stacking)
+        "rotationY" => $rotationY,
+        "orientedDimensions" => [
+            "length" => $orientedLength,
+            "width" => $orientedWidth,
+            "height" => $orientedHeight
+        ],
+        "layer" => ($orientedHeight > 0) ? floor(($i * $orientedHeight) / ($orientedHeight * 2)) + 1 : 1
+    ];
+    $placed_item_base["color"] = sprintf('#%02X%02X%02X', rand(100, 240), rand(100, 240), rand(100, 240));
+
+    $simulated_visualization_data["containers"][0]["placedItems"][] = $placed_item_base;
+
+    // Accumulate volume for summary (using original dimensions for simplicity here, as quantity not tied to visualized items)
+    $itemVolume = ($placed_item_base["originalDimensions"]["width"]) * ($placed_item_base["originalDimensions"]["length"]) * ($placed_item_base["originalDimensions"]["height"]);
     $simulated_visualization_data["summary"]["totalVolumePlaced"] += $itemVolume * ($currentItem['quantity'] ?? 1);
     $simulated_visualization_data["containers"][0]["loadSummary"]["totalVolume"] += $itemVolume * ($currentItem['quantity'] ?? 1);
 }
