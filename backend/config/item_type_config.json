@@ -2,29 +2,64 @@
 {
   "itemTypes": {
     "box": {
-      "maxSupportWeightKg": 50
+      "max_weight_kg": 2000,
+      "maxSupportWeightKg": 50,
+      "allowsDirectStackingOnTop": true,
+      "isDeformable": false,
+      "allowsStackingOfSameType": true
     },
     "pallet": {
-      "maxSupportWeightKg": 1000,
-      "isFixedFootprint": true
+      "max_weight_kg": 2000,
+      "maxSupportWeightKg": 1500,
+      "isFixedFootprint": true,
+      "allowsDirectStackingOnTop": true,
+      "isDeformable": false,
+      "allowsStackingOfSameType": true
     },
     "sacks": {
-      "maxSupportWeightKg": 10,
-      "settlingFactor": 0.9
+      "max_weight_kg": 50,
+      "maxSupportWeightKg": 5,
+      "settlingFactor": 0.9,
+      "allowsDirectStackingOnTop": false,
+      "allowsStackingOfSameType": true,
+      "isDeformable": true,
+      "maxStackHeightUnits": 3
     },
     "pipes": {
-      "maxSupportWeightKg": 0,
-      "handlingStrategy": "bundle"
+      "max_weight_kg": 5000,
+      "maxSupportWeightKg": 2,
+      "isCylindrical": true,
+      "assumedOrientation": "lay_flat_along_length",
+      "allowsDirectStackingOnTop": false,
+      "allowsStackingOfSameType": true,
+      "stackingBehavior": "bundle_pyramid_base",
+      "isDeformable": false
     },
     "barels": {
-      "maxSupportWeightKg": 200,
-      "isCylindrical": true
+      "max_weight_kg": 300,
+      "maxSupportWeightKg": 200,  // When standing on end
+      "maxSupportOnSideKg": 5,    // When laid on its side (very little for general items)
+      "isCylindrical": true,
+      "assumedOrientation": "stand_on_end", // User inputs W=D, L=D, H=BarrelHeight
+      "allowsDirectStackingOnTop": true,   // True if on end, effectively false if on side for general items
+      "isDeformable": false,
+      "allowsStackingOfSameType": true    // Barrel on barrel (end on end)
     },
     "jumbo": {
-      "maxSupportWeightKg": 20,
-      "settlingFactor": 0.85
+      "max_weight_kg": 1200,
+      "maxSupportWeightKg": 10,
+      "settlingFactor": 0.85,
+      "allowsDirectStackingOnTop": false,
+      "allowsStackingOfSameType": true,
+      "isDeformable": true,
+      "maxStackHeightUnits": 2
     }
   },
-  "defaultMaxSupportWeightKg": 0
+  "defaultMax_weight_kg": null,
+  "defaultMaxSupportWeightKg": 0,
+  "defaultAllowsDirectStackingOnTop": false,
+  "defaultIsDeformable": false,
+  "defaultAllowsStackingOfSameType": true,
+  "defaultMaxStackHeightUnits": null
 }
 ```
